@@ -25,5 +25,13 @@ export {
 
     inline constexpr USize CACHE_LINE_SIZE = 64;
 
-    inline constexpr EntityID INVALID_ENTITY = std::numeric_limits<EntityID>::max();
+    constexpr EntityID INVALID_ENTITY = std::numeric_limits<EntityID>::max();
+    constexpr U32 INVALID_INDEX = std::numeric_limits<U32>::max();
+    constexpr U32 INVALID_GENERATION = std::numeric_limits<U32>::max();
+
+    template<class _Ty, class _Alloc = std::allocator<_Ty>>
+    using Vector = std::vector<_Ty, _Alloc>;
+
+    template <class _Ty, size_t _Size>
+    using Array = std::array<_Ty, _Size>;
 }
