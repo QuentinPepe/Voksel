@@ -30,8 +30,8 @@ private:
 
         std::lock_guard lock{s_Mutex};
 
-        // Format: [TIME] [LEVEL] Message
         auto &out = s_FileOutput.is_open() ? s_FileOutput : std::cout;
+        // Format: [TIME] [LEVEL] Message
         out << std::format("[{:%H:%M:%S}] [{}] {}\n", std::chrono::floor<std::chrono::seconds>(now),
                            LevelToString(level), message);
     }

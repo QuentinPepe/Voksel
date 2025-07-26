@@ -1,26 +1,12 @@
 import ECS.Query;
 import ECS.Component;
+import ECS.World;
 import Core.Types;
 import Core.Log;
 import Core.Assert;
+
 import std;
 
-struct Position {
-    float x, y, z;
-};
-
-struct Velocity {
-    float dx, dy, dz;
-};
-
-struct Health {
-    int hp;
-    int max_hp;
-};
-
-struct Player {};
-struct Enemy {};
-struct Dead {};
 
 class TestWorld {
 private:
@@ -297,11 +283,37 @@ void TestParallelExecution() {
     Logger::Debug("✓ Parallel execution test completed");
 }
 
+void MovementSystem(Query<Position, Velocity> query, F32 dt) {
+    for (auto [pos, vel] : query) {
+        pos.x += vel.dx * dt;
+        pos.y += vel.dy * dt;
+        pos.z += vel.dz * dt;
+        std:: cout << pos.x << " " << pos.y << " " << pos.z << std::endl;
+    }
+}
+
 int main() {
     Logger::SetLevel(LogLevel::Debug);
     Logger::SetFile("voxel_engine.log");
 
     Logger::Info("Starting the Voksel Engine v{}.{}.{}", 0, 1, 0);
+
+    World world;
+
+    world.AddSystem<Position, Velocity>("Movement", MovementSystem);
+
+    for (int i = 0; i < 1000; ++i) {
+        auto e = world.CreateEntity();
+        world.AddComponent(e, Position{float(i), 0.0f, 0.0f});
+        world.AddComponent(e, Velocity{1.0f, 0.0f, 0.0f});
+    }
+
+    const F32 dt = 1.0f / 60.0f;
+
+    int time = 0;
+    while (time++ < 10) {
+        world.Update(dt);
+    }
 
     Logger::Info("Starting ECS Query Tests");
     Logger::Info("========================");

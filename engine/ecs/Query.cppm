@@ -109,7 +109,7 @@ public:
 
     template<typename Func>
     void ParForEach(Func&& func) const {
-        std::vector<EntityID> validEntities;
+        Vector<EntityID> validEntities;
         validEntities.reserve(1000);
 
         for (EntityID e = 0; e < m_MaxEntity; ++e) {
@@ -133,9 +133,9 @@ export template<typename... Components>
 class FilteredQuery {
 private:
     std::tuple<ComponentStorage<Components>*...> m_RequiredStorages;
-    std::vector<IComponentStorageBase*> m_WithStorages;
-    std::vector<IComponentStorageBase*> m_WithoutStorages;
-    std::vector<IComponentStorageBase*> m_OptionalStorages;
+    Vector<IComponentStorageBase*> m_WithStorages;
+    Vector<IComponentStorageBase*> m_WithoutStorages;
+    Vector<IComponentStorageBase*> m_OptionalStorages;
     EntityID m_MaxEntity;
 
     [[nodiscard]] bool Matches(EntityID entity) const {
@@ -158,9 +158,9 @@ private:
 
 public:
     FilteredQuery(std::tuple<ComponentStorage<Components>*...> required,
-                  std::vector<IComponentStorageBase*> with,
-                  std::vector<IComponentStorageBase*> without,
-                  std::vector<IComponentStorageBase*> optional,
+                  Vector<IComponentStorageBase*> with,
+                  Vector<IComponentStorageBase*> without,
+                  Vector<IComponentStorageBase*> optional,
                   EntityID maxEntity)
         : m_RequiredStorages{required}
         , m_WithStorages{std::move(with)}
@@ -221,9 +221,9 @@ export template<typename World>
 class QueryBuilder {
 private:
     World* m_World;
-    std::vector<IComponentStorageBase*> m_With;
-    std::vector<IComponentStorageBase*> m_Without;
-    std::vector<IComponentStorageBase*> m_Optional;
+    Vector<IComponentStorageBase*> m_With;
+    Vector<IComponentStorageBase*> m_Without;
+    Vector<IComponentStorageBase*> m_Optional;
 
 public:
     explicit QueryBuilder(World* world) : m_World{world} {}
