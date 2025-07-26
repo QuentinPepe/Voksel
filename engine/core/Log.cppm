@@ -25,9 +25,8 @@ private:
         }
 
         auto now = std::chrono::system_clock::now();
-        auto time_t = std::chrono::system_clock::to_time_t(now);
 
-        std::string message = std::vformat(format, std::make_format_args(std::forward<Args>(args)...));
+        std::string message = std::vformat(format, std::make_format_args<std::format_context>(args...));
 
         std::lock_guard lock{s_Mutex};
 
@@ -89,13 +88,3 @@ public:
         LogImpl(LogLevel::Critical, format, std::forward<Args>(args)...);
     }
 };
-
-export
-{
-    #define LOG_TRACE(...) ::Logger::Trace(__VA_ARGS__)
-    #define LOG_DEBUG(...) ::Logger::Debug(__VA_ARGS__)
-    #define LOG_INFO(...) ::Logger::Info(__VA_ARGS__)
-    #define LOG_WARN(...) ::Logger::Warn(__VA_ARGS__)
-    #define LOG_ERROR(...) ::Logger::Error(__VA_ARGS__)
-    #define LOG_CRITICAL(...) ::Logger::Critical(__VA_ARGS__)
-}
