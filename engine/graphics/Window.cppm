@@ -12,8 +12,6 @@ export module Graphics.Window;
 
 import Core.Assert;
 import Core.Types;
-import Core.Log;
-import std;
 
 export struct WindowConfig {
     U32 width = 1280;
@@ -59,7 +57,7 @@ public:
         glfwTerminate();
     }
 
-    [[nodiscard]] U32 GetWith() const { return m_Width; }
+    [[nodiscard]] U32 GetWidth() const { return m_Width; }
     [[nodiscard]] U32 GetHeight() const { return m_Height; }
 
     [[nodiscard]] bool ShouldClose() const {

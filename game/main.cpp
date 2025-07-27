@@ -4,6 +4,7 @@ import ECS.World;
 import Core.Types;
 import Core.Log;
 import Graphics.Window;
+import Graphics.Renderer;
 import std;
 
 
@@ -19,9 +20,13 @@ int main() {
     windowConfig.title = "VokselEngine - Game";
 
     Window window{windowConfig};
+    Renderer renderer{&window};
 
     while (!window.ShouldClose()) {
         window.PollEvents();
+        renderer.BeginFrame();
+        // TODO Render Scene
+        renderer.EndFrame();
     }
 
     return 0;
