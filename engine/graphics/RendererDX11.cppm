@@ -5,7 +5,6 @@ module;
 #include <assert.h>
 #include <d3d11.h>
 #include <dxgi.h>
-#include <d3dcompiler.h>
 #include <wrl/client.h>
 
 export module Graphics.RendererDX11;
