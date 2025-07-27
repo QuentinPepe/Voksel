@@ -5,8 +5,25 @@ import Core.Types;
 import Core.Log;
 import std;
 
+struct Position {
+    F32 x, y, z;
+};
+
+struct Velocity {
+    F32 dx, dy, dz;
+};
+
+struct Health {
+    S32 hp;
+    S32 max_hp;
+};
+
+struct Player {};
+struct Enemy {};
+struct Dead {};
+
 void MovementSystem(Query<World, Position, Velocity> query, F32 dt) {
-    for (auto [pos, vel] : query.Iter<Position, Velocity>()) {
+    for (const auto& [pos, vel] : query.Iter<Position, Velocity>()) {
         pos->x += vel->dx * dt;
         pos->y += vel->dy * dt;
         pos->z += vel->dz * dt;
@@ -14,7 +31,7 @@ void MovementSystem(Query<World, Position, Velocity> query, F32 dt) {
 }
 
 void HealthSystem(Query<World, Health, Without<Dead>> query, F32) {
-    for (auto [health] : query.Iter<Health>()) {
+    for (const auto& [health] : query.Iter<Health>()) {
         if (health->hp <= 0) {
             Logger::Warn("Entity died!");
         }
@@ -22,7 +39,7 @@ void HealthSystem(Query<World, Health, Without<Dead>> query, F32) {
 }
 
 void PlayerMovementSystem(Query<World, Position, Velocity, With<Player>> query, F32 dt) {
-    for (auto [pos, vel] : query.Iter<Position, Velocity>()) {
+    for (const auto& [pos, vel] : query.Iter<Position, Velocity>()) {
         pos->x += vel->dx * dt * 2.0f;
         pos->y += vel->dy * dt * 2.0f;
         pos->z += vel->dz * dt * 2.0f;
@@ -30,7 +47,7 @@ void PlayerMovementSystem(Query<World, Position, Velocity, With<Player>> query, 
 }
 
 void EnemyAISystem(Query<World, Position, With<Enemy>, Without<Dead>> query, F32 dt) {
-    for (auto [pos] : query.Iter<Position>()) {
+    for (const auto& [pos] : query.Iter<Position>()) {
         pos->x += std::sin(pos->y) * dt;
         pos->y += std::cos(pos->x) * dt;
     }
@@ -40,7 +57,7 @@ void RenderSystem(Query<World, Position, Optional<Health>> query, F32) {
     static int frame = 0;
     if (frame++ % 60 == 0) {
         Logger::Info("=== Render Frame ===");
-        for (auto [pos, health] : query.Iter<Position, Health>()) {
+        for (const auto& [pos, health] : query.Iter<Position, Health>()) {
             if (health) {
                 Logger::Info("Entity at ({}, {}) with {} HP", pos->x, pos->y, health->hp);
             } else {
@@ -53,23 +70,23 @@ void RenderSystem(Query<World, Position, Optional<Health>> query, F32) {
 void ComplexQueryTest() {
     World world;
 
-    auto e1 = world.CreateEntity();
+    const auto e1 = world.CreateEntity();
     world.AddComponent(e1, Position{1.0f, 1.0f, 1.0f});
     world.AddComponent(e1, Velocity{0.1f, 0.1f, 0.1f});
     world.AddComponent(e1, Health{100, 100});
 
-    auto e2 = world.CreateEntity();
+    const auto e2 = world.CreateEntity();
     world.AddComponent(e2, Position{2.0f, 2.0f, 2.0f});
     world.AddComponent(e2, Velocity{0.2f, 0.2f, 0.2f});
 
-    auto e3 = world.CreateEntity();
+    const auto e3 = world.CreateEntity();
     world.AddComponent(e3, Position{3.0f, 3.0f, 3.0f});
     world.AddComponent(e3, Health{50, 50});
 
     {
         Query<World, Position, Velocity> q1(&world);
         Logger::Info("Entities with Position AND Velocity: {}", q1.Count());
-        for (auto [pos, vel] : q1.Iter<Position, Velocity>()) {
+        for (const auto& [pos, vel] : q1.Iter<Position, Velocity>()) {
             Logger::Info("  Pos: {}, Vel: {}", pos->x, vel->dx);
         }
     }
@@ -77,7 +94,7 @@ void ComplexQueryTest() {
     {
         Query<World, Position, With<Health>> q2(&world);
         Logger::Info("Entities with Position that also have Health: {}", q2.Count());
-        for (auto [pos] : q2.Iter<Position>()) {
+        for (const auto& [pos] : q2.Iter<Position>()) {
             Logger::Info("  Pos: {}", pos->x);
         }
     }
@@ -85,7 +102,7 @@ void ComplexQueryTest() {
     {
         Query<World, Position, Without<Velocity>> q3(&world);
         Logger::Info("Entities with Position but WITHOUT Velocity: {}", q3.Count());
-        for (auto [pos] : q3.Iter<Position>()) {
+        for (const auto& [pos] : q3.Iter<Position>()) {
             Logger::Info("  Pos: {}", pos->x);
         }
     }
@@ -93,7 +110,7 @@ void ComplexQueryTest() {
     {
         Query<World, Position, Optional<Health>> q4(&world);
         Logger::Info("All entities with Position (Health optional): {}", q4.Count());
-        for (auto [pos, health] : q4.Iter<Position, Health>()) {
+        for (const auto& [pos, health] : q4.Iter<Position, Health>()) {
             if (health) {
                 Logger::Info("  Pos: {}, Health: {}", pos->x, health->hp);
             } else {
@@ -113,26 +130,26 @@ int main() {
     Logger::Info("\n=== World System Test ===");
     World world;
 
-    world.AddSystem<Position, Velocity>("Movement", MovementSystem);
-    world.AddSystem<Health, Without<Dead>>("Health", HealthSystem);
-    world.AddSystem<Position, Velocity, With<Player>>("PlayerMovement", PlayerMovementSystem);
-    world.AddSystem<Position, With<Enemy>, Without<Dead>>("EnemyAI", EnemyAISystem);
-    world.AddSystem<Position, Optional<Health>>("Render", RenderSystem);
+    world.AddSystem("Movement", MovementSystem);
+    world.AddSystem("Health", HealthSystem);
+    world.AddSystem("PlayerMovement", PlayerMovementSystem);
+    world.AddSystem("EnemyAI", EnemyAISystem);
+    world.AddSystem("Render", RenderSystem);
 
-    auto player = world.CreateEntity();
+    const auto player = world.CreateEntity();
     world.AddComponent(player, Position{0.0f, 0.0f, 0.0f});
     world.AddComponent(player, Velocity{10.0f, 0.0f, 0.0f});
     world.AddComponent(player, Health{100, 100});
     world.AddComponent(player, Player{});
 
     for (int i = 0; i < 5; ++i) {
-        auto enemy = world.CreateEntity();
+        const auto enemy = world.CreateEntity();
         world.AddComponent(enemy, Position{float(i * 20), 50.0f, 0.0f});
         world.AddComponent(enemy, Health{50, 50});
         world.AddComponent(enemy, Enemy{});
     }
 
-    auto prop = world.CreateEntity();
+    const auto prop = world.CreateEntity();
     world.AddComponent(prop, Position{100.0f, 100.0f, 0.0f});
 
     const F32 dt = 1.0f / 60.0f;
@@ -147,7 +164,6 @@ int main() {
     Logger::Info("  Healths: {}", world.GetStorage<Health>()->Size());
     Logger::Info("  Players: {}", world.GetStorage<Player>()->Size());
     Logger::Info("  Enemies: {}", world.GetStorage<Enemy>()->Size());
-    Logger::Info("  Dead: {}", world.GetStorage<Dead>()->Size());
 
     return 0;
 }

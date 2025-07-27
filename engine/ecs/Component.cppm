@@ -10,7 +10,7 @@ public:
     [[nodiscard]] virtual void* GetRaw(EntityID entity) = 0;
     [[nodiscard]] virtual const void* GetRaw(EntityID entity) const = 0;
     [[nodiscard]] virtual USize Size() const = 0;
-    [[nodiscard]] virtual void Clear() = 0;
+    virtual void Clear() = 0;
 };
 
 export template<typename T>
@@ -109,7 +109,7 @@ public:
         return &m_Components[m_Sparse[entity]];
     }
 
-    [[nodiscard]] const void* GetRaw(EntityID entity) const override {
+    [[nodiscard]]  const void* GetRaw(EntityID entity) const override {
         if (entity >= m_Sparse.size() || m_Sparse[entity] == INVALID_INDEX) {
             return nullptr;
         }

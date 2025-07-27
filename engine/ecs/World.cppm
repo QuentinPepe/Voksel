@@ -3,75 +3,140 @@ export module ECS.World;
 import ECS.Component;
 import ECS.Query;
 import Core.Types;
+import Core.Assert;
 import std;
+
+template<typename T> struct QueryTraits;
+
+template<typename World, typename... Args>
+struct QueryTraits<void(*)(Query<World, Args...>, F32)> {
+    using WorldType = World;
+    using QueryType = Query<World, Args...>;
+    static constexpr auto Components = std::tuple<Args...>{};
+};
+
+template<typename World, typename... Args>
+struct QueryTraits<void(Query<World, Args...>, F32)> {
+    using WorldType = World;
+    using QueryType = Query<World, Args...>;
+    static constexpr auto Components = std::tuple<Args...>{};
+};
 
 export class World {
 private:
-    ComponentStorage<Position> m_Positions;
-    ComponentStorage<Velocity> m_Velocities;
-    ComponentStorage<Health> m_Healths;
-    ComponentStorage<Player> m_Players;
-    ComponentStorage<Enemy> m_Enemies;
-    ComponentStorage<Dead> m_Dead;
-    EntityID m_NextEntity = 0;
-
-    struct SystemInfo {
-        std::string name;
-        std::function<void(F32)> func;
+    struct ISystem {
+        virtual ~ISystem() = default;
+        virtual void Update(World* world, F32 dt) = 0;
     };
-    std::vector<SystemInfo> m_Systems;
+
+    template<typename Func>
+    class System : public ISystem {
+    private:
+        Func m_Func;
+
+    public:
+        explicit System(Func func) : m_Func{func} {}
+
+        void Update(World *world, F32 dt) override {
+            using Traits = QueryTraits<Func>;
+            typename Traits::QueryType query{world};
+            m_Func(query, dt);
+        }
+    };
+
+    EntityManager m_EntityManager;
+    UnorderedMap<ComponentID, UniquePtr<IComponentStorageBase>> m_Storages;
+    Vector<std::pair<std::string, UniquePtr<ISystem>>> m_Systems;
 
 public:
-    EntityID CreateEntity() {
-        return m_NextEntity++;
+    EntityHandle CreateEntity() {
+        return m_EntityManager.CreateEntity();
     }
 
-    EntityID GetMaxEntityId() const {
-        return m_NextEntity;
+    void DestroyEntity(EntityHandle handle) {
+        for (auto &storage: m_Storages | std::views::values) {
+            if (storage->Contains(handle.id)) {
+                // TODO
+            }
+        }
+        m_EntityManager.DestroyEntity(handle);
+    }
+
+    template<typename T>
+    void AddComponent(EntityHandle handle, T&& component){
+        assert(m_EntityManager.IsValid(handle), "The handle is invalid.");
+        auto componentID = ComponentRegistry::GetID<T>();
+        if (!m_Storages.contains(componentID)) {
+            m_Storages[componentID] = std::make_unique<ComponentStorage<T>>();
+        }
+        static_cast<ComponentStorage<T>*>(m_Storages[componentID].get())->Insert(handle.id, handle.generation, std::forward<T>(component));
+    }
+
+    template<typename T>
+    void AddComponent(EntityID entity, T&& component) {
+        if (auto generation = m_EntityManager.GetGeneration(entity); generation != INVALID_GENERATION) {
+            AddComponent(EntityHandle{entity, generation}, std::forward<T>(component));
+        }
+    }
+
+    // TODO RemoveComponent
+
+    template<typename T>
+    T* GetComponent(EntityHandle handle) {
+        if (!m_EntityManager.IsValid(handle)) {
+            return nullptr;
+        }
+
+        auto componentId = ComponentRegistry::GetID<T>();
+        if (auto it = m_Storages.find(componentId); it != m_Storages.end()) {
+            return static_cast<ComponentStorage<T>*>(it->second.get())->Get(handle.id, handle.generation);
+        }
+        return nullptr;
+    }
+
+    template<typename T>
+    T* GetComponent(EntityID entity) {
+        if (auto generation = m_EntityManager.GetGeneration(entity); generation != INVALID_GENERATION) {
+            return GetComponent<T>(EntityHandle{entity, generation});
+        }
+        return nullptr;
     }
 
     template<typename T>
     ComponentStorage<T>* GetStorage() {
-        if constexpr (std::is_same_v<T, Position>) return &m_Positions;
-        else if constexpr (std::is_same_v<T, Velocity>) return &m_Velocities;
-        else if constexpr (std::is_same_v<T, Health>) return &m_Healths;
-        else if constexpr (std::is_same_v<T, Player>) return &m_Players;
-        else if constexpr (std::is_same_v<T, Enemy>) return &m_Enemies;
-        else if constexpr (std::is_same_v<T, Dead>) return &m_Dead;
+        auto componentId = ComponentRegistry::GetID<T>();
+        if (auto it = m_Storages.find(componentId); it != m_Storages.end()) {
+            return static_cast<ComponentStorage<T>*>(it->second.get());
+        }
+        return nullptr;
     }
 
-    template<typename T>
-    void AddComponent(EntityID entity, T component) {
-        GetStorage<T>()->Insert(entity, 0, std::move(component));
+    [[nodiscard]] EntityID GetMaxEntityId() const {
+        return m_EntityManager.GetMaxEntityID();
     }
 
-    template<typename T>
-    void RemoveComponent(EntityID entity) {
-        GetStorage<T>()->Remove(entity, 0);
-    }
-
-    template<typename... Args, typename Func>
+    template<typename Func>
     void AddSystem(const std::string& name, Func func) {
-        m_Systems.push_back({name, [this, func](F32 dt) {
-            Query<World, Args...> query(this);
-            func(query, dt);
-        }});
+        m_Systems.emplace_back(name, std::make_unique<System<Func>>(func));
     }
 
-    void Update(F32 dt) const {
-        for (auto& system : m_Systems) {
-            system.func(dt);
+    void Update(F32 dt) {
+        for (const auto &system: m_Systems | std::views::values) {
+            system->Update(this, dt);
         }
     }
 
-    void PrintStats() {
-        std::cout << "World Stats:\n";
-        std::cout << "  Entities: " << m_NextEntity << "\n";
-        std::cout << "  Positions: " << m_Positions.Size() << "\n";
-        std::cout << "  Velocities: " << m_Velocities.Size() << "\n";
-        std::cout << "  Healths: " << m_Healths.Size() << "\n";
-        std::cout << "  Players: " << m_Players.Size() << "\n";
-        std::cout << "  Enemies: " << m_Enemies.Size() << "\n";
-        std::cout << "  Dead: " << m_Dead.Size() << "\n";
+    void RemoveSystem(const std::string& name) {
+        std::erase_if(m_Systems, [&name](const auto& pair) { return pair.first == name; });
+    }
+
+    [[nodiscard]] USize GetSystemCount() const {
+        return m_Systems.size();
+    }
+
+    void Clear() {
+        m_Storages.clear();
+        m_Systems.clear();
+        m_EntityManager.Clear();
     }
 };

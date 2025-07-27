@@ -20,8 +20,7 @@ export {
     using SSize = std::ptrdiff_t;
 
     using EntityID = U32;
-    using ComponentID = U16;
-    using ArchetypeID = U32;
+    using ComponentID = USize;
 
     inline constexpr USize CACHE_LINE_SIZE = 64;
 
@@ -35,22 +34,9 @@ export {
     template <class _Ty, size_t _Size>
     using Array = std::array<_Ty, _Size>;
 
+    template<class T>
+    using UniquePtr = std::unique_ptr<T>;
 
-    /* TODO MOVE */
-    struct Position {
-        F32 x, y, z;
-    };
-
-    struct Velocity {
-        F32 dx, dy, dz;
-    };
-
-    struct Health {
-        S32 hp;
-        S32 max_hp;
-    };
-
-    struct Player {};
-    struct Enemy {};
-    struct Dead {};
+    template<class K, class V>
+    using UnorderedMap = std::unordered_map<K, V>;
 }

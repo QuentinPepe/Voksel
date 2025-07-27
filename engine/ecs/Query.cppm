@@ -55,16 +55,15 @@ export template<typename World, typename... Args>
 class Query {
 private:
     World* m_World;
-    std::vector<EntityID> m_Entities;
 
     template<typename T>
-    bool ContainsComponent(EntityID entity) const {
+    [[nodiscard]] bool ContainsComponent(EntityID entity) const {
         auto* storage = m_World->template GetStorage<typename extract_type<T>::type>();
         return storage && storage->Contains(entity);
     }
 
     template<typename Filter>
-    bool CheckFilter(EntityID entity) const {
+    [[nodiscard]] bool CheckFilter(EntityID entity) const {
         if constexpr (is_with<Filter>::value) {
             return ContainsComponent<typename Filter::type>(entity);
         } else if constexpr (is_without<Filter>::value) {
@@ -76,13 +75,8 @@ private:
         }
     }
 
-    void CollectEntities() {
-        auto maxEntity = m_World->GetMaxEntityId();
-        for (EntityID entity = 0; entity < maxEntity; ++entity) {
-            if ((CheckFilter<Args>(entity) && ...)) {
-                m_Entities.push_back(entity);
-            }
-        }
+    [[nodiscard]] bool MatchQuery(EntityID entity) const {
+        return (CheckFilter<Args>(entity) && ...);
     }
 
     template<typename... Components>
@@ -96,7 +90,6 @@ private:
                 return storage && storage->Contains(entity) ? static_cast<T*>(storage->GetRaw(entity)) : nullptr;
             } else {
                 return static_cast<T*>(world->template GetStorage<T>()->GetRaw(entity));
-
             }
         }
 
@@ -106,33 +99,40 @@ private:
     };
 
 public:
-    explicit Query(World* world) : m_World(world) {
-        CollectEntities();
-    }
+    explicit Query(World* world) : m_World{world} {}
 
     template<typename... Components>
     class TypedIterator {
     private:
         Query* m_Query;
-        size_t m_Index;
+        EntityID m_Current;
+        EntityID m_Max;
         ComponentGetter<Components...> m_Getter;
 
+        void FindNext() {
+            while (m_Current < m_Max && !m_Query->MatchQuery(m_Current)) {
+                ++m_Current;
+            }
+        }
     public:
-        TypedIterator(Query* query, size_t index)
-            : m_Query(query), m_Index(index), m_Getter{query->m_World} {}
+        TypedIterator(Query* query, EntityID start, EntityID max) : m_Query{query}, m_Current{start}, m_Max{max}, m_Getter{query->m_World} {
+            if (m_Current < m_Max) {
+                FindNext();
+            }
+        }
 
         auto operator*() const {
-            EntityID entity = m_Query->m_Entities[m_Index];
-            return m_Getter.Get(entity);
+            return m_Getter.Get(m_Current);
         }
 
         TypedIterator& operator++() {
-            ++m_Index;
+            ++m_Current;
+            FindNext();
             return *this;
         }
 
         bool operator!=(const TypedIterator& other) const {
-            return m_Index != other.m_Index;
+            return m_Current != other.m_Current;
         }
     };
 
@@ -140,29 +140,42 @@ public:
     auto Iter() {
         struct Range {
             Query* query;
-            auto begin() { return TypedIterator<Components...>(query, 0); }
-            auto end() { return TypedIterator<Components...>(query, query->m_Entities.size()); }
+            EntityID maxEntity;
+            auto begin() { return TypedIterator<Components...>(query, 0, maxEntity); }
+            auto end() { return TypedIterator<Components...>(query, maxEntity, maxEntity); }
         };
-        return Range{this};
+        return Range{this, m_World->GetMaxEntityId()};
     }
 
-    [[nodiscard]] size_t Count() const { return m_Entities.size(); }
-    [[nodiscard]] bool IsEmpty() const { return m_Entities.empty(); }
+    [[nodiscard]] size_t Count() const {
+        size_t count = 0;
+        auto maxEntity = m_World->GetMaxEntityId();
+        for (EntityID entity = 0; entity < maxEntity; ++entity) {
+            if (MatchQuery(entity)) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
+    [[nodiscard]] bool IsEmpty() const {
+        auto maxEntity = m_World->GetMaxEntityId();
+        for (EntityID entity = 0; entity < maxEntity; ++entity) {
+            if (MatchQuery(entity)) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     template<typename... Components>
     void ForEach(auto func) {
-        for (auto entity : m_Entities) {
-            ComponentGetter<Components...> getter{m_World};
-            std::apply(func, getter.Get(entity));
-        }
-    }
-
-    template<typename... Components>
-    void ParForEach(auto func) {
-        std::for_each(std::execution::par_unseq, m_Entities.begin(), m_Entities.end(),
-            [this, &func](EntityID entity) {
-                ComponentGetter<Components...> getter{m_World};
+        ComponentGetter<Components...> getter{m_World};
+        auto maxEntity = m_World->GetMaxEntityId();
+        for (EntityID entity = 0; entity < maxEntity; ++entity) {
+            if (MatchQuery(entity)) {
                 std::apply(func, getter.Get(entity));
-            });
+            }
+        }
     }
 };
