@@ -1,4 +1,5 @@
 set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_MSVC_MODULE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/modules")
 
 function(set_target_options target)
     target_compile_options(${target} PRIVATE

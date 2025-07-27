@@ -34,4 +34,23 @@ export {
 
     template <class _Ty, size_t _Size>
     using Array = std::array<_Ty, _Size>;
+
+
+    /* TODO MOVE */
+    struct Position {
+        F32 x, y, z;
+    };
+
+    struct Velocity {
+        F32 dx, dy, dz;
+    };
+
+    struct Health {
+        S32 hp;
+        S32 max_hp;
+    };
+
+    struct Player {};
+    struct Enemy {};
+    struct Dead {};
 }

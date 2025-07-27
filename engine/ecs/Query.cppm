@@ -4,254 +4,165 @@ import ECS.Component;
 import Core.Types;
 import std;
 
-export template<typename T> struct With {};
-export template<typename T> struct Without {};
-export template<typename T> struct Optional {};
+export template<typename T>
+struct With {
+    using type = T;
+};
 
-template<typename T> struct is_filter : std::false_type {};
-template<typename T> struct is_filter<With<T>> : std::true_type {};
-template<typename T> struct is_filter<Without<T>> : std::true_type {};
-template<typename T> struct is_filter<Optional<T>> : std::true_type {};
+export template<typename T>
+struct Without {
+    using type = T;
+};
 
-template<typename T> struct extract_type { using type = T; };
-template<typename T> struct extract_type<With<T>> { using type = T; };
-template<typename T> struct extract_type<Without<T>> { using type = T; };
-template<typename T> struct extract_type<Optional<T>> { using type = T; };
+export template<typename T>
+struct Optional {
+    using type = T;
+};
 
-export template<typename... Components>
+template<typename T>
+struct is_with : std::false_type {};
+template<typename T>
+struct is_with<With<T>> : std::true_type {};
+
+template<typename T>
+struct is_without : std::false_type {};
+template<typename T>
+struct is_without<Without<T>> : std::true_type {};
+
+template<typename T>
+struct is_optional : std::false_type {};
+template<typename T>
+struct is_optional<Optional<T>> : std::true_type {};
+
+template<typename T>
+struct extract_type {
+    using type = T;
+};
+template<typename T>
+struct extract_type<With<T>> {
+    using type = T;
+};
+template<typename T>
+struct extract_type<Without<T>> {
+    using type = T;
+};
+template<typename T>
+struct extract_type<Optional<T>> {
+    using type = T;
+};
+
+export template<typename World, typename... Args>
 class Query {
 private:
-    std::tuple<ComponentStorage<Components>*...> m_Storages;
-    EntityID m_MaxEntity;
-
-    [[nodiscard]] bool HasAllComponents(EntityID entity) const {
-        return (std::get<ComponentStorage<Components>*>(m_Storages)->Contains(entity) && ...);
-    }
-
-public:
-    Query(ComponentStorage<Components>*... storages, EntityID maxEntity)
-        : m_Storages{storages...}
-        , m_MaxEntity{maxEntity} {}
-
-    class Iterator {
-    private:
-        const Query* m_Query;
-        EntityID m_Current;
-
-        void AdvanceToValid() {
-            while (m_Current < m_Query->m_MaxEntity &&
-                   !m_Query->HasAllComponents(m_Current)) {
-                ++m_Current;
-            }
-        }
-
-    public:
-        Iterator(const Query* query, EntityID start)
-            : m_Query{query}, m_Current{start} {
-            AdvanceToValid();
-        }
-
-        bool operator!=(const Iterator& other) const {
-            return m_Current != other.m_Current;
-        }
-
-        bool operator==(const Iterator& other) const {
-            return m_Current == other.m_Current;
-        }
-
-        Iterator& operator++() {
-            ++m_Current;
-            AdvanceToValid();
-            return *this;
-        }
-
-        auto operator*() const {
-            return std::apply([this](auto*... storages) {
-                return std::tuple<Components&...>(*storages->GetUnchecked(m_Current)...);
-            }, m_Query->m_Storages);
-        }
-
-        EntityID Entity() const { return m_Current; }
-    };
-
-    Iterator begin() const { return Iterator{this, 0}; }
-    Iterator end() const { return Iterator{this, m_MaxEntity}; }
-
-    [[nodiscard]] auto Get(EntityID entity) const
-        -> std::optional<std::tuple<Components&...>> {
-        if (!HasAllComponents(entity)) {
-            return std::nullopt;
-        }
-
-        return std::apply([entity](auto*... storages) {
-            return std::make_optional(std::tuple<Components&...>(*storages->GetUnchecked(entity)...));
-        }, m_Storages);
-    }
-
-    [[nodiscard]] bool IsEmpty() const {
-        return begin() == end();
-    }
-
-    [[nodiscard]] std::size_t Count() const {
-        std::size_t count = 0;
-        for (auto it = begin(); it != end(); ++it) {
-            ++count;
-        }
-        return count;
-    }
-
-    template<typename Func>
-    void ForEach(Func&& func) const {
-        for (auto components : *this) {
-            std::apply(func, components);
-        }
-    }
-
-    template<typename Func>
-    void ParForEach(Func&& func) const {
-        Vector<EntityID> validEntities;
-        validEntities.reserve(1000);
-
-        for (EntityID e = 0; e < m_MaxEntity; ++e) {
-            if (HasAllComponents(e)) {
-                validEntities.push_back(e);
-            }
-        }
-
-        std::for_each(std::execution::par_unseq,
-            validEntities.begin(), validEntities.end(),
-            [this, &func](EntityID entity) {
-                std::apply([entity, &func](auto*... storages) {
-                    func(*storages->GetUnchecked(entity)...);
-                }, m_Storages);
-            }
-        );
-    }
-};
-
-export template<typename... Components>
-class FilteredQuery {
-private:
-    std::tuple<ComponentStorage<Components>*...> m_RequiredStorages;
-    Vector<IComponentStorageBase*> m_WithStorages;
-    Vector<IComponentStorageBase*> m_WithoutStorages;
-    Vector<IComponentStorageBase*> m_OptionalStorages;
-    EntityID m_MaxEntity;
-
-    [[nodiscard]] bool Matches(EntityID entity) const {
-        auto hasRequired = std::apply([entity](auto*... storages) {
-            return (storages->Contains(entity) && ...);
-        }, m_RequiredStorages);
-
-        if (!hasRequired) return false;
-
-        for (auto* storage : m_WithStorages) {
-            if (!storage->Contains(entity)) return false;
-        }
-
-        for (auto* storage : m_WithoutStorages) {
-            if (storage->Contains(entity)) return false;
-        }
-
-        return true;
-    }
-
-public:
-    FilteredQuery(std::tuple<ComponentStorage<Components>*...> required,
-                  Vector<IComponentStorageBase*> with,
-                  Vector<IComponentStorageBase*> without,
-                  Vector<IComponentStorageBase*> optional,
-                  EntityID maxEntity)
-        : m_RequiredStorages{required}
-        , m_WithStorages{std::move(with)}
-        , m_WithoutStorages{std::move(without)}
-        , m_OptionalStorages{std::move(optional)}
-        , m_MaxEntity{maxEntity} {}
-
-    class Iterator {
-    private:
-        const FilteredQuery* m_Query;
-        EntityID m_Current;
-
-        void AdvanceToValid() {
-            while (m_Current < m_Query->m_MaxEntity &&
-                   !m_Query->Matches(m_Current)) {
-                ++m_Current;
-            }
-        }
-
-    public:
-        Iterator(const FilteredQuery* query, EntityID start)
-            : m_Query{query}, m_Current{start} {
-            AdvanceToValid();
-        }
-
-        bool operator!=(const Iterator& other) const {
-            return m_Current != other.m_Current;
-        }
-
-        Iterator& operator++() {
-            ++m_Current;
-            AdvanceToValid();
-            return *this;
-        }
-
-        auto operator*() const {
-            return std::apply([this](auto*... storages) {
-                return std::tuple<Components&...>(*storages->GetUnchecked(m_Current)...);
-            }, m_Query->m_RequiredStorages);
-        }
-
-        EntityID Entity() const { return m_Current; }
-    };
-
-    Iterator begin() const { return Iterator{this, 0}; }
-    Iterator end() const { return Iterator{this, m_MaxEntity}; }
-};
-
-export template<typename World, typename... Components>
-[[nodiscard]] auto MakeQuery(World* world) {
-    return Query<Components...>{
-        world->template GetStorage<Components>()...,
-        world->GetMaxEntityId()
-    };
-}
-
-export template<typename World>
-class QueryBuilder {
-private:
     World* m_World;
-    Vector<IComponentStorageBase*> m_With;
-    Vector<IComponentStorageBase*> m_Without;
-    Vector<IComponentStorageBase*> m_Optional;
-
-public:
-    explicit QueryBuilder(World* world) : m_World{world} {}
+    std::vector<EntityID> m_Entities;
 
     template<typename T>
-    QueryBuilder& With() {
-        m_With.push_back(m_World->template GetStorage<T>());
-        return *this;
+    bool ContainsComponent(EntityID entity) const {
+        auto* storage = m_World->template GetStorage<typename extract_type<T>::type>();
+        return storage && storage->Contains(entity);
     }
 
-    template<typename T>
-    QueryBuilder& Without() {
-        m_Without.push_back(m_World->template GetStorage<T>());
-        return *this;
+    template<typename Filter>
+    bool CheckFilter(EntityID entity) const {
+        if constexpr (is_with<Filter>::value) {
+            return ContainsComponent<typename Filter::type>(entity);
+        } else if constexpr (is_without<Filter>::value) {
+            return !ContainsComponent<typename Filter::type>(entity);
+        } else if constexpr (is_optional<Filter>::value) {
+            return true;
+        } else {
+            return ContainsComponent<Filter>(entity);
+        }
     }
 
-    template<typename T>
-    QueryBuilder& Optional() {
-        m_Optional.push_back(m_World->template GetStorage<T>());
-        return *this;
+    void CollectEntities() {
+        auto maxEntity = m_World->GetMaxEntityId();
+        for (EntityID entity = 0; entity < maxEntity; ++entity) {
+            if ((CheckFilter<Args>(entity) && ...)) {
+                m_Entities.push_back(entity);
+            }
+        }
     }
 
     template<typename... Components>
-    auto Build() {
-        return FilteredQuery<Components...>{
-            std::make_tuple(m_World->template GetStorage<Components>()...),
-            m_With, m_Without, m_Optional,
-            m_World->GetMaxEntityId()
+    struct ComponentGetter {
+        World* world;
+
+        template<typename T>
+        auto GetOne(EntityID entity) const {
+            if constexpr (std::disjunction_v<std::is_same<Optional<T>, Args>...>) {
+                auto* storage = world->template GetStorage<T>();
+                return storage && storage->Contains(entity) ? static_cast<T*>(storage->GetRaw(entity)) : nullptr;
+            } else {
+                return static_cast<T*>(world->template GetStorage<T>()->GetRaw(entity));
+
+            }
+        }
+
+        auto Get(EntityID entity) const {
+            return std::tuple<decltype(GetOne<Components>(entity))...>(GetOne<Components>(entity)...);
+        }
+    };
+
+public:
+    explicit Query(World* world) : m_World(world) {
+        CollectEntities();
+    }
+
+    template<typename... Components>
+    class TypedIterator {
+    private:
+        Query* m_Query;
+        size_t m_Index;
+        ComponentGetter<Components...> m_Getter;
+
+    public:
+        TypedIterator(Query* query, size_t index)
+            : m_Query(query), m_Index(index), m_Getter{query->m_World} {}
+
+        auto operator*() const {
+            EntityID entity = m_Query->m_Entities[m_Index];
+            return m_Getter.Get(entity);
+        }
+
+        TypedIterator& operator++() {
+            ++m_Index;
+            return *this;
+        }
+
+        bool operator!=(const TypedIterator& other) const {
+            return m_Index != other.m_Index;
+        }
+    };
+
+    template<typename... Components>
+    auto Iter() {
+        struct Range {
+            Query* query;
+            auto begin() { return TypedIterator<Components...>(query, 0); }
+            auto end() { return TypedIterator<Components...>(query, query->m_Entities.size()); }
         };
+        return Range{this};
+    }
+
+    [[nodiscard]] size_t Count() const { return m_Entities.size(); }
+    [[nodiscard]] bool IsEmpty() const { return m_Entities.empty(); }
+
+    template<typename... Components>
+    void ForEach(auto func) {
+        for (auto entity : m_Entities) {
+            ComponentGetter<Components...> getter{m_World};
+            std::apply(func, getter.Get(entity));
+        }
+    }
+
+    template<typename... Components>
+    void ParForEach(auto func) {
+        std::for_each(std::execution::par_unseq, m_Entities.begin(), m_Entities.end(),
+            [this, &func](EntityID entity) {
+                ComponentGetter<Components...> getter{m_World};
+                std::apply(func, getter.Get(entity));
+            });
     }
 };
