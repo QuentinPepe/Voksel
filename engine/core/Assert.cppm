@@ -13,7 +13,12 @@ export struct SourceLocation {
 export void assert_fail(const char* expr, const SourceLocation& loc) {
     Logger::Critical("Assertion failed: {} in {} at {}:{}:{}",
                      expr, loc.function_name, loc.file_name, loc.line, loc.column);
-    std::abort();
+
+#if defined(_MSC_VER)
+    __debugbreak();
+#endif
+
+   std::exit(1);
 }
 
 export inline void assert(bool condition, const char* expr,

@@ -1,0 +1,89 @@
+module;
+
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+
+#ifdef _WIN32
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#endif
+
+export module Graphics.Window;
+
+import Core.Assert;
+import Core.Types;
+import Core.Log;
+import std;
+
+export struct WindowConfig {
+    U32 width = 1280;
+    U32 height = 720;
+    const char* title = "Voksel Engine";
+    bool fullscreen = false;
+    bool vsync = true;
+};
+
+export class Window {
+private:
+    GLFWwindow* m_Window = nullptr;
+    U32 m_Width;
+    U32 m_Height;
+
+public:
+    explicit Window(const WindowConfig& config) : m_Width{config.width}, m_Height{config.height} {
+        assert(glfwInit(), "Failed to initialize GLFW");
+
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+
+        m_Window = glfwCreateWindow(
+            config.width,
+            config.height,
+            config.title,
+            config.fullscreen ? glfwGetPrimaryMonitor() : nullptr,
+            nullptr
+        );
+
+        if (!m_Window) {
+            glfwTerminate();
+            assert(true, "Failed to create window");
+        }
+
+        glfwSetWindowUserPointer(m_Window, this);
+        glfwSetFramebufferSizeCallback(m_Window, FrameBufferSizeCallback);
+    }
+
+    ~Window() {
+        if (m_Window) {
+            glfwDestroyWindow(m_Window);
+        }
+        glfwTerminate();
+    }
+
+    [[nodiscard]] U32 GetWith() const { return m_Width; }
+    [[nodiscard]] U32 GetHeight() const { return m_Height; }
+
+    [[nodiscard]] bool ShouldClose() const {
+        return glfwWindowShouldClose(m_Window);
+    }
+
+    void PollEvents() {
+        glfwPollEvents();
+    }
+
+#ifdef _WIN32
+    [[nodiscard]] HWND GetWin32Handle() const {
+        return glfwGetWin32Window(m_Window);
+    }
+#endif
+
+    [[nodiscard]] GLFWwindow* GetGLFWHandle() const {
+        return  m_Window;
+    }
+
+private:
+    static void FrameBufferSizeCallback(GLFWwindow* window, int width, int height) {
+        auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
+        self->m_Width = width;
+        self->m_Height = height;
+    }
+};
