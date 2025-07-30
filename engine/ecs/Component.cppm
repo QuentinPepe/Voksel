@@ -3,242 +3,242 @@ export module ECS.Component;
 import Core.Types;
 import std;
 
-export class IComponentStorageBase {
-public:
-    virtual ~IComponentStorageBase() = default;
-    [[nodiscard]] virtual bool Contains(EntityID entity) const = 0;
-    [[nodiscard]] virtual void* GetRaw(EntityID entity) = 0;
-    [[nodiscard]] virtual const void* GetRaw(EntityID entity) const = 0;
-    [[nodiscard]] virtual USize Size() const = 0;
-    virtual void Clear() = 0;
+export struct EntityHandle {
+    U32 packed{};
+
+    constexpr EntityHandle() = default;
+    constexpr EntityHandle(U16 id, U16 generation)
+        : packed{(static_cast<U32>(generation) << 16) | id} {}
+
+    [[nodiscard]] constexpr U16 id() const { return packed & 0xFFFF; }
+    [[nodiscard]] constexpr U16 generation() const { return packed >> 16; }
+    [[nodiscard]] constexpr bool valid() const { return packed != 0; }
+
+    constexpr bool operator==(const EntityHandle&) const = default;
 };
 
-export template<typename T>
-class ComponentStorage : public IComponentStorageBase {
-private:
-    struct EntityData {
-        EntityID entity;
-        U32 generation;
-    };
-
-    Vector<U32> m_Sparse{};
-    Vector<EntityData> m_Entities{};
-    Vector<T> m_Components{};
-    Vector<U32> m_Generations{};
-
-public:
-    void Insert(EntityID entityID, U32 generation, T component) {
-        if (entityID >= m_Sparse.size()) {
-            m_Sparse.resize(entityID + 1, INVALID_INDEX);
-            m_Generations.resize(entityID + 1, 0);
-        }
-
-        if (m_Sparse[entityID] != INVALID_INDEX) {
-            if (m_Generations[entityID] == generation) {
-                m_Components[m_Sparse[entityID]] = std::move(component);
-            }
-        } else {
-            m_Sparse[entityID] = static_cast<U32>(m_Entities.size());
-            m_Generations[entityID] = generation;
-            m_Entities.push_back(EntityData{entityID, generation});
-            m_Components.push_back(std::move(component));
-        }
+export template<>
+struct std::hash<EntityHandle> {
+    constexpr size_t operator()(EntityHandle const& h) const noexcept {
+        return h.packed;
     }
+};
 
-    void Remove(EntityID entityID, U32 generation) {
-        if (entityID >= m_Sparse.size() ||
-            m_Sparse[entityID] == INVALID_INDEX ||
-            m_Generations[entityID] != generation) {
-            return;
-        }
-
-        U32 index = m_Sparse[entityID];
-        U32 lastIndex = static_cast<U32>(m_Entities.size() - 1);
-
-        if (index != lastIndex) {
-            m_Entities[index] = m_Entities[lastIndex];
-            m_Components[index] = std::move(m_Components[lastIndex]);
-            m_Sparse[m_Entities[index].entity] = index;
-        }
-
-        m_Entities.pop_back();
-        m_Components.pop_back();
-        m_Sparse[entityID] = INVALID_INDEX;
+static consteval U64 ConstexprFNV1a(const char* s) {
+    U64 h = 14681457744538843682ULL;
+    while (*s) {
+        h ^= static_cast<U64>(*s++);
+        h *= 1099511628211ULL;
     }
+    return h;
+}
 
-    [[nodiscard]] T* Get(EntityID entity, U32 generation) {
-        if (entity >= m_Sparse.size() ||
-            m_Sparse[entity] == INVALID_INDEX ||
-            m_Generations[entity] != generation) {
-            return nullptr;
-        }
-        return &m_Components[m_Sparse[entity]];
+
+export template <typename T>
+struct ComponentTypeID {
+    static consteval ComponentID value() {
+        static_assert([]{return false;}(), "Specialize ComponentTypeID<T> for each component!");
+        return 0;
     }
-
-    [[nodiscard]] const T* Get(EntityID entity, U32 generation) const {
-        if (entity >= m_Sparse.size() ||
-            m_Sparse[entity] == INVALID_INDEX ||
-            m_Generations[entity] != generation) {
-            return nullptr;
-        }
-        return &m_Components[m_Sparse[entity]];
-    }
-
-    [[nodiscard]] T* GetUnchecked(EntityID entity) {
-        return &m_Components[m_Sparse[entity]];
-    }
-
-    [[nodiscard]] const T* GetUnchecked(EntityID entity) const {
-        return &m_Components[m_Sparse[entity]];
-    }
-
-    [[nodiscard]] bool Contains(EntityID entityID) const override {
-        return entityID < m_Sparse.size() && m_Sparse[entityID] != INVALID_INDEX;
-    }
-
-    [[nodiscard]] bool Contains(EntityID entityID, U32 generation) const {
-        return entityID < m_Sparse.size() &&
-               m_Sparse[entityID] != INVALID_INDEX &&
-               m_Generations[entityID] == generation;
-    }
-
-    [[nodiscard]] void* GetRaw(EntityID entity) override {
-        if (entity >= m_Sparse.size() || m_Sparse[entity] == INVALID_INDEX) {
-            return nullptr;
-        }
-        return &m_Components[m_Sparse[entity]];
-    }
-
-    [[nodiscard]]  const void* GetRaw(EntityID entity) const override {
-        if (entity >= m_Sparse.size() || m_Sparse[entity] == INVALID_INDEX) {
-            return nullptr;
-        }
-        return &m_Components[m_Sparse[entity]];
-    }
-
-    [[nodiscard]] USize Size() const override {
-        return m_Components.size();
-    }
-
-    void Clear() override {
-        m_Sparse.clear();
-        m_Entities.clear();
-        m_Components.clear();
-        m_Generations.clear();
-    }
-
-    [[nodiscard]] auto begin() { return m_Components.begin(); }
-    [[nodiscard]] auto end() { return m_Components.end(); }
-    [[nodiscard]] auto begin() const { return m_Components.begin(); }
-    [[nodiscard]] auto end() const { return m_Components.end(); }
-
-    [[nodiscard]] const Vector<EntityData>& GetEntities() const { return m_Entities; }
-    [[nodiscard]] const Vector<T>& GetComponents() const { return m_Components; }
-
-    class Iterator {
-    private:
-        const ComponentStorage* m_Storage;
-        USize m_Index;
-
-    public:
-        Iterator(const ComponentStorage* storage, USize index)
-            : m_Storage{storage}, m_Index{index} {}
-
-        bool operator!=(const Iterator& other) const {
-            return m_Index != other.m_Index;
-        }
-
-        Iterator& operator++() {
-            ++m_Index;
-            return *this;
-        }
-
-        std::pair<EntityID, T&> operator*() {
-            return std::pair<EntityID, T&>{
-                m_Storage->m_Entities[m_Index].entity,
-                const_cast<T&>(m_Storage->m_Components[m_Index])
-            };
-        }
-    };
-
-    Iterator IterateWith() { return Iterator{this, 0}; }
-    Iterator IterateEnd() { return Iterator{this, m_Components.size()}; }
 };
 
 export class ComponentRegistry {
-private:
-    static inline std::atomic<ComponentID> s_NextID{0};
-
 public:
     template<typename T>
-    static ComponentID GetID() {
-        static ComponentID id = s_NextID.fetch_add(1);
-        return id;
+    static consteval ComponentID GetID() {
+        return ComponentTypeID<T>::value();
     }
 };
 
-export struct EntityHandle {
-    EntityID id;
-    U32 generation;
 
-    bool operator==(const EntityHandle& other) const {
-        return id == other.id && generation == other.generation;
+export using Archetype = U64;
+
+export constexpr Archetype EMPTY_ARCHETYPE = 0;
+
+export template<typename... Components>
+consteval Archetype MakeArchetype() {
+    Archetype arch = 0;
+    ((arch |= (1ULL << ComponentRegistry::GetID<Components>())), ...);
+    return arch;
+}
+
+export template<typename T>
+class ComponentStorage {
+private:
+    static constexpr U32 CHUNK_SIZE = 64;
+
+    struct Chunk {
+        alignas(64) std::array<T, CHUNK_SIZE> components{};
+        std::array<EntityHandle, CHUNK_SIZE> entities{};
+        U32 count{0};
+    };
+
+    Vector<UniquePtr<Chunk>> m_Chunks{};
+    UnorderedMap<U16, std::pair<U32, U32>> m_EntityToChunk{};
+
+public:
+    void Insert(EntityHandle handle, T component) {
+        auto [it, inserted] = m_EntityToChunk.try_emplace(handle.id());
+
+        if (!inserted) {
+
+            auto [chunkIdx, compIdx] = it->second;
+            m_Chunks[chunkIdx]->components[compIdx] = std::move(component);
+            m_Chunks[chunkIdx]->entities[compIdx] = handle;
+            return;
+        }
+
+        for (U32 i = 0; i < m_Chunks.size(); ++i) {
+            if (m_Chunks[i]->count < CHUNK_SIZE) {
+                U32 idx = m_Chunks[i]->count++;
+                m_Chunks[i]->components[idx] = std::move(component);
+                m_Chunks[i]->entities[idx] = handle;
+                it->second = {i, idx};
+                return;
+            }
+        }
+
+        auto chunk = std::make_unique<Chunk>();
+        chunk->components[0] = std::move(component);
+        chunk->entities[0] = handle;
+        chunk->count = 1;
+        it->second = {static_cast<U32>(m_Chunks.size()), 0};
+        m_Chunks.push_back(std::move(chunk));
     }
 
-    bool operator!=(const EntityHandle& other) const {
-        return !(*this == other);
+    void Remove(EntityHandle handle) {
+        auto it = m_EntityToChunk.find(handle.id());
+        if (it == m_EntityToChunk.end()) return;
+
+        auto [chunkIdx, compIdx] = it->second;
+        auto& chunk = *m_Chunks[chunkIdx];
+
+        U32 lastIdx = chunk.count - 1;
+        if (compIdx != lastIdx) {
+            chunk.components[compIdx] = std::move(chunk.components[lastIdx]);
+            chunk.entities[compIdx] = chunk.entities[lastIdx];
+
+            m_EntityToChunk[chunk.entities[compIdx].id()] = {chunkIdx, compIdx};
+        }
+
+        chunk.count--;
+        m_EntityToChunk.erase(it);
+    }
+
+    [[nodiscard]] T* Get(EntityHandle handle) {
+        auto it = m_EntityToChunk.find(handle.id());
+        if (it == m_EntityToChunk.end()) return nullptr;
+
+        auto [chunkIdx, compIdx] = it->second;
+        auto& entity = m_Chunks[chunkIdx]->entities[compIdx];
+
+        if (entity.generation() != handle.generation()) return nullptr;
+
+        return &m_Chunks[chunkIdx]->components[compIdx];
+    }
+
+    [[nodiscard]] const T* Get(EntityHandle handle) const {
+        return const_cast<ComponentStorage*>(this)->Get(handle);
+    }
+
+    [[nodiscard]] bool Contains(EntityHandle handle) const {
+        auto it = m_EntityToChunk.find(handle.id());
+        if (it == m_EntityToChunk.end()) return false;
+
+        auto [chunkIdx, compIdx] = it->second;
+        return m_Chunks[chunkIdx]->entities[compIdx].generation() == handle.generation();
+    }
+
+    class Iterator {
+        const ComponentStorage* storage;
+        U32 chunkIdx;
+        U32 compIdx;
+
+        void Advance() {
+            compIdx++;
+            while (chunkIdx < storage->m_Chunks.size() &&
+                   compIdx >= storage->m_Chunks[chunkIdx]->count) {
+                chunkIdx++;
+                compIdx = 0;
+            }
+        }
+
+    public:
+        Iterator(const ComponentStorage* s, U32 ci, U32 ii)
+            : storage{s}, chunkIdx{ci}, compIdx{ii} {}
+
+        Iterator& operator++() {
+            Advance();
+            return *this;
+        }
+
+        bool operator!=(const Iterator& other) const {
+            return chunkIdx != other.chunkIdx || compIdx != other.compIdx;
+        }
+
+        std::pair<EntityHandle, T&> operator*() {
+            auto& chunk = *storage->m_Chunks[chunkIdx];
+            return {chunk.entities[compIdx],
+                    const_cast<T&>(chunk.components[compIdx])};
+        }
+    };
+
+    Iterator begin() const { return Iterator{this, 0, 0}; }
+    Iterator end() const { return Iterator{this, static_cast<U32>(m_Chunks.size()), 0}; }
+
+    void Clear() {
+        m_Chunks.clear();
+        m_EntityToChunk.clear();
+    }
+
+    [[nodiscard]] USize Size() const {
+        USize total = 0;
+        for (const auto& chunk : m_Chunks) {
+            total += chunk->count;
+        }
+        return total;
     }
 };
 
 export class EntityManager {
 private:
-    Vector<U32> m_Generations{};
-    Vector<EntityID> m_FreeList{};
-    EntityID m_NextEntity{0};
+    static constexpr U16 MAX_ENTITIES = 0xFFFF;
+
+    Vector<EntityHandle> m_FreeList{};
+    U16 m_NextEntity{1};
+    U16 m_NextGeneration{1};
 
 public:
     [[nodiscard]] EntityHandle CreateEntity() {
-        EntityID id;
-        U32 generation;
-
         if (!m_FreeList.empty()) {
-            id = m_FreeList.back();
+            auto handle = m_FreeList.back();
             m_FreeList.pop_back();
-            generation = ++m_Generations[id];
-        } else {
-            id = m_NextEntity++;
-            m_Generations.push_back(0);
-            generation = 0;
+
+            U16 newGen = (handle.generation() + 1) & 0xFFFF;
+            if (newGen == 0) newGen = 1;
+
+            return EntityHandle{handle.id(), newGen};
         }
 
-        return EntityHandle{id, generation};
+        if (m_NextEntity == MAX_ENTITIES) {
+            return {};
+        }
+
+        return EntityHandle{m_NextEntity++, m_NextGeneration};
     }
 
     void DestroyEntity(EntityHandle handle) {
-        if (handle.id >= m_Generations.size() ||
-            m_Generations[handle.id] != handle.generation) {
-            return;
-        }
-
-        m_FreeList.push_back(handle.id);
+        if (!handle.valid()) return;
+        m_FreeList.push_back(handle);
     }
 
-    [[nodiscard]] bool IsValid(EntityHandle handle) const {
-        return handle.id < m_Generations.size() &&
-               m_Generations[handle.id] == handle.generation;
-    }
-
-    [[nodiscard]] U32 GetGeneration(EntityID id) const {
-        return id < m_Generations.size() ? m_Generations[id] : INVALID_GENERATION;
-    }
-
-    [[nodiscard]] EntityID GetMaxEntityID() const {
+    [[nodiscard]] constexpr U16 GetMaxEntityID() const {
         return m_NextEntity;
     }
 
     void Clear() {
-        m_Generations.clear();
         m_FreeList.clear();
-        m_NextEntity = 0;
+        m_NextEntity = 1;
+        m_NextGeneration = 1;
     }
 };

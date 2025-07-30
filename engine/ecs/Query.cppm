@@ -7,48 +7,86 @@ import std;
 export template<typename T>
 struct With {
     using type = T;
+    static constexpr bool is_with = true;
+    static constexpr bool is_without = false;
+    static constexpr bool is_optional = false;
 };
 
 export template<typename T>
 struct Without {
     using type = T;
+    static constexpr bool is_with = false;
+    static constexpr bool is_without = true;
+    static constexpr bool is_optional = false;
 };
 
 export template<typename T>
 struct Optional {
     using type = T;
+    static constexpr bool is_with = false;
+    static constexpr bool is_without = false;
+    static constexpr bool is_optional = true;
 };
-
-template<typename T>
-struct is_with : std::false_type {};
-template<typename T>
-struct is_with<With<T>> : std::true_type {};
-
-template<typename T>
-struct is_without : std::false_type {};
-template<typename T>
-struct is_without<Without<T>> : std::true_type {};
-
-template<typename T>
-struct is_optional : std::false_type {};
-template<typename T>
-struct is_optional<Optional<T>> : std::true_type {};
 
 template<typename T>
 struct extract_type {
     using type = T;
+    static constexpr bool is_with = true;
+    static constexpr bool is_without = false;
+    static constexpr bool is_optional = false;
 };
+
 template<typename T>
 struct extract_type<With<T>> {
     using type = T;
+    static constexpr bool is_with = true;
+    static constexpr bool is_without = false;
+    static constexpr bool is_optional = false;
 };
+
 template<typename T>
 struct extract_type<Without<T>> {
     using type = T;
+    static constexpr bool is_with = false;
+    static constexpr bool is_without = true;
+    static constexpr bool is_optional = false;
 };
+
 template<typename T>
 struct extract_type<Optional<T>> {
     using type = T;
+    static constexpr bool is_with = false;
+    static constexpr bool is_without = false;
+    static constexpr bool is_optional = true;
+};
+
+template<typename... Args>
+struct QueryMasks {
+    static consteval auto Calculate() {
+        struct Masks {
+            Archetype include{0};
+            Archetype exclude{0};
+            Archetype optional{0};
+        } masks;
+
+        auto processArg = []<typename Arg>(Masks& m) {
+            using Extracted = extract_type<Arg>;
+            const ComponentID id = ComponentRegistry::GetID<typename Extracted::type>();
+
+            if constexpr (Extracted::is_with) {
+                m.include |= (1ULL << id);
+            } else if constexpr (Extracted::is_without) {
+                m.exclude |= (1ULL << id);
+            } else if constexpr (Extracted::is_optional) {
+                m.optional |= (1ULL << id);
+            }
+        };
+
+        (processArg.template operator()<Args>(masks), ...);
+        return masks;
+    }
+
+    static constexpr auto masks = Calculate();
 };
 
 export template<typename World, typename... Args>
@@ -56,73 +94,78 @@ class Query {
 private:
     World* m_World;
 
-    template<typename T>
-    [[nodiscard]] bool ContainsComponent(EntityID entity) const {
-        auto* storage = m_World->template GetStorage<typename extract_type<T>::type>();
-        return storage && storage->Contains(entity);
+    static constexpr auto s_Masks = QueryMasks<Args...>::masks;
+
+    [[nodiscard]] constexpr bool MatchesArchetype(Archetype arch) const {
+
+        if ((arch & s_Masks.include) != s_Masks.include) return false;
+
+        if ((arch & s_Masks.exclude) != 0) return false;
+
+        return true;
     }
 
-    template<typename Filter>
-    [[nodiscard]] bool CheckFilter(EntityID entity) const {
-        if constexpr (is_with<Filter>::value) {
-            return ContainsComponent<typename Filter::type>(entity);
-        } else if constexpr (is_without<Filter>::value) {
-            return !ContainsComponent<typename Filter::type>(entity);
-        } else if constexpr (is_optional<Filter>::value) {
-            return true;
-        } else {
-            return ContainsComponent<Filter>(entity);
-        }
+    [[nodiscard]] Archetype GetEntityArchetype(EntityHandle handle) const {
+        return m_World->GetEntityArchetype(handle);
     }
 
-    [[nodiscard]] bool MatchQuery(EntityID entity) const {
-        return (CheckFilter<Args>(entity) && ...);
-    }
+public:
+    explicit Query(World* world) : m_World{world} {}
 
     template<typename... Components>
     struct ComponentGetter {
         World* world;
 
         template<typename T>
-        auto GetOne(EntityID entity) const {
-            if constexpr (std::disjunction_v<std::is_same<Optional<T>, Args>...>) {
+        auto GetOne(EntityHandle handle) const {
+            constexpr bool isOptional = []<typename... QArgs>() {
+                return ((std::is_same_v<Optional<T>, QArgs> || ...) || false);
+            }.template operator()<Args...>();
+
+            if constexpr (isOptional) {
                 auto* storage = world->template GetStorage<T>();
-                return storage && storage->Contains(entity) ? static_cast<T*>(storage->GetRaw(entity)) : nullptr;
+                return storage ? storage->Get(handle) : nullptr;
             } else {
-                return static_cast<T*>(world->template GetStorage<T>()->GetRaw(entity));
+                return world->template GetStorage<T>()->Get(handle);
             }
         }
 
-        auto Get(EntityID entity) const {
-            return std::tuple<decltype(GetOne<Components>(entity))...>(GetOne<Components>(entity)...);
+        auto Get(EntityHandle handle) const {
+            return std::tuple<decltype(GetOne<Components>(handle))...>(
+                GetOne<Components>(handle)...
+            );
         }
     };
-
-public:
-    explicit Query(World* world) : m_World{world} {}
 
     template<typename... Components>
     class TypedIterator {
     private:
         Query* m_Query;
-        EntityID m_Current;
-        EntityID m_Max;
+        World* m_World;
+        typename World::EntityIterator m_Current;
+        typename World::EntityIterator m_End;
         ComponentGetter<Components...> m_Getter;
 
         void FindNext() {
-            while (m_Current < m_Max && !m_Query->MatchQuery(m_Current)) {
+            while (m_Current != m_End) {
+                auto [handle, arch] = *m_Current;
+                if (m_Query->MatchesArchetype(arch)) {
+                    break;
+                }
                 ++m_Current;
             }
         }
+
     public:
-        TypedIterator(Query* query, EntityID start, EntityID max) : m_Query{query}, m_Current{start}, m_Max{max}, m_Getter{query->m_World} {
-            if (m_Current < m_Max) {
-                FindNext();
-            }
+        TypedIterator(Query* query, typename World::EntityIterator begin,
+                     typename World::EntityIterator end)
+            : m_Query{query}, m_World{query->m_World},
+              m_Current{begin}, m_End{end}, m_Getter{query->m_World} {
+            FindNext();
         }
 
         auto operator*() const {
-            return m_Getter.Get(m_Current);
+            return m_Getter.Get((*m_Current).first);
         }
 
         TypedIterator& operator++() {
@@ -140,18 +183,28 @@ public:
     auto Iter() {
         struct Range {
             Query* query;
-            EntityID maxEntity;
-            auto begin() { return TypedIterator<Components...>(query, 0, maxEntity); }
-            auto end() { return TypedIterator<Components...>(query, maxEntity, maxEntity); }
+
+            auto begin() {
+                return TypedIterator<Components...>(
+                    query, query->m_World->EntitiesBegin(),
+                    query->m_World->EntitiesEnd()
+                );
+            }
+
+            auto end() {
+                return TypedIterator<Components...>(
+                    query, query->m_World->EntitiesEnd(),
+                    query->m_World->EntitiesEnd()
+                );
+            }
         };
-        return Range{this, m_World->GetMaxEntityId()};
+        return Range{this};
     }
 
-    [[nodiscard]] size_t Count() const {
-        size_t count = 0;
-        auto maxEntity = m_World->GetMaxEntityId();
-        for (EntityID entity = 0; entity < maxEntity; ++entity) {
-            if (MatchQuery(entity)) {
+    [[nodiscard]] USize Count() const {
+        USize count = 0;
+        for (auto it = m_World->EntitiesBegin(); it != m_World->EntitiesEnd(); ++it) {
+            if (MatchesArchetype(it->second)) {
                 ++count;
             }
         }
@@ -159,9 +212,8 @@ public:
     }
 
     [[nodiscard]] bool IsEmpty() const {
-        auto maxEntity = m_World->GetMaxEntityId();
-        for (EntityID entity = 0; entity < maxEntity; ++entity) {
-            if (MatchQuery(entity)) {
+        for (auto it = m_World->EntitiesBegin(); it != m_World->EntitiesEnd(); ++it) {
+            if (MatchesArchetype(it->second)) {
                 return false;
             }
         }
@@ -171,11 +223,15 @@ public:
     template<typename... Components>
     void ForEach(auto func) {
         ComponentGetter<Components...> getter{m_World};
-        auto maxEntity = m_World->GetMaxEntityId();
-        for (EntityID entity = 0; entity < maxEntity; ++entity) {
-            if (MatchQuery(entity)) {
-                std::apply(func, getter.Get(entity));
+
+        for (auto it = m_World->EntitiesBegin(); it != m_World->EntitiesEnd(); ++it) {
+            if (MatchesArchetype(it->second)) {
+                std::apply(func, getter.Get(it->first));
             }
         }
     }
+
+    static consteval Archetype GetIncludeMask() { return s_Masks.include; }
+    static consteval Archetype GetExcludeMask() { return s_Masks.exclude; }
+    static consteval Archetype GetOptionalMask() { return s_Masks.optional; }
 };
