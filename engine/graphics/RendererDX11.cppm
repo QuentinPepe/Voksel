@@ -2,7 +2,6 @@ module;
 
 #ifdef VOXEL_USE_DX11
 
-#include <assert.h>
 #include <d3d11.h>
 #include <dxgi.h>
 #include <wrl/client.h>

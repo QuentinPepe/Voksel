@@ -16,19 +16,19 @@ import Core.Types;
 export struct WindowConfig {
     U32 width = 1280;
     U32 height = 720;
-    const char* title = "Voksel Engine";
+    const char *title = "Voksel Engine";
     bool fullscreen = false;
     bool vsync = true;
 };
 
 export class Window {
 private:
-    GLFWwindow* m_Window = nullptr;
+    GLFWwindow *m_Window = nullptr;
     U32 m_Width;
     U32 m_Height;
 
 public:
-    explicit Window(const WindowConfig& config) : m_Width{config.width}, m_Height{config.height} {
+    explicit Window(const WindowConfig &config) : m_Width{config.width}, m_Height{config.height} {
         assert(glfwInit(), "Failed to initialize GLFW");
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -45,9 +45,6 @@ public:
             glfwTerminate();
             assert(true, "Failed to create window");
         }
-
-        glfwSetWindowUserPointer(m_Window, this);
-        glfwSetFramebufferSizeCallback(m_Window, FrameBufferSizeCallback);
     }
 
     ~Window() {
@@ -74,14 +71,12 @@ public:
     }
 #endif
 
-    [[nodiscard]] GLFWwindow* GetGLFWHandle() const {
-        return  m_Window;
+    [[nodiscard]] GLFWwindow *GetGLFWHandle() const {
+        return m_Window;
     }
 
-private:
-    static void FrameBufferSizeCallback(GLFWwindow* window, int width, int height) {
-        auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
-        self->m_Width = width;
-        self->m_Height = height;
+    void UpdateDimensions(U32 width, U32 height) {
+        m_Width = width;
+        m_Height = height;
     }
 };

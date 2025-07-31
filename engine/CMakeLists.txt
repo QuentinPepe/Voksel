@@ -1,6 +1,7 @@
 add_subdirectory(core)
 add_subdirectory(ecs)
 add_subdirectory(graphics)
+add_subdirectory(input)
 
 add_library(voxel_engine INTERFACE)
 
@@ -9,6 +10,7 @@ target_link_libraries(voxel_engine
             voxel_core
             voxel_ecs
             voxel_graphics
+            voxel_input
 )
 
 target_include_directories(voxel_engine
