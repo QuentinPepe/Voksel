@@ -1,174 +1,110 @@
-import ECS.Query;
-import ECS.Component;
-import ECS.World;
 import Core.Types;
 import Core.Log;
 import Graphics.Window;
-import Graphics.Renderer;
-import Graphics.Mesh;
-import Graphics.RenderPipeline;
-import Input.Core;
-import Input.Manager;
-import Input.Bindings;
-import Input.Window;
+import Graphics;
 import std;
-
-class DebugInputListener {
-public:
-    void OnKeyEvent(const KeyEvent& event) {
-        if (event.action == InputEventAction::Press) {
-            Logger::Debug("Key pressed: {} (scancode: {})", GetKeyName(event.key), event.scancode);
-        }
-    }
-
-    void OnMouseButtonEvent(const MouseButtonEvent& event) {
-        if (event.action == InputEventAction::Press) {
-            Logger::Debug("Mouse button pressed: {} at ({}, {})",
-                         GetMouseButtonName(event.button), event.x, event.y);
-        }
-    }
-
-    void OnMouseMoveEvent(const MouseMoveEvent& event) {
-    }
-
-    void OnMouseScrollEvent(const MouseScrollEvent& event) {
-        Logger::Debug("Mouse scroll: ({}, {})", event.xOffset, event.yOffset);
-    }
-
-    void OnTextInputEvent(const TextInputEvent& event) {
-        Logger::Debug("Text input: U+{:04X}", event.codepoint);
-    }
-};
 
 int main() {
     Logger::SetLevel(LogLevel::Debug);
-    Logger::SetFile("voxel_engine.log");
+    // Logger::SetFile("voxel_engine.log");
 
     Logger::Info("Starting the Voksel Engine v{}.{}.{}", 0, 1, 0);
 
-    WindowConfig windowConfig{};
-    windowConfig.width = 1920;
-    windowConfig.height = 1080;
-    windowConfig.title = "VokselEngine - Input System Demo";
-
+    WindowConfig windowConfig;
+    windowConfig.width = 1280;
+    windowConfig.height = 720;
+    windowConfig.title = "Voksel - Triangle Example";
+    windowConfig.fullscreen = false;
     Window window{windowConfig};
-    Renderer renderer{&window};
 
-    auto* device = renderer.GetDX11Backend()->GetDevice();
-    auto* context = renderer.GetDX11Backend()->GetContext();
-    RenderPipeline pipeline{device, context};
+    GraphicsConfig graphicsConfig;
+    graphicsConfig.enableValidation = true;
+    graphicsConfig.enableVSync = true;
+    auto graphics = CreateGraphicsContext(window, graphicsConfig);
 
-    auto triangleMesh = CreateTriangleMesh(device);
+    Vertex triangleVertices[] = {
+        {{0.0f, 0.5f, 0.0f},   {1.0f, 0.0f, 0.0f, 1.0f}},
+        {{0.5f, -0.5f, 0.0f},  {0.0f, 1.0f, 0.0f, 1.0f}},
+        {{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}}
+    };
 
-    InputManager inputManager;
-    WindowInputHandler windowInput{&window, &inputManager};
+    U32 vertexBuffer = graphics->CreateVertexBuffer(triangleVertices, sizeof(triangleVertices));
 
-    InputMapper inputMapper;
+    ShaderCode vertexShader;
+    vertexShader.source = R"(
+struct VSInput {
+    float3 position : POSITION;
+    float4 color    : COLOR;
+};
 
-    auto gameContext = inputMapper.CreateContext("Game", 10);
-    auto uiContext = inputMapper.CreateContext("UI", 20);
+struct PSInput {
+    float4 position : SV_POSITION;
+    float4 color    : COLOR;
+};
 
-    inputMapper.SetupFPSControls(gameContext);
+PSInput main(VSInput input) {
+    PSInput output;
+    output.position = float4(input.position, 1.0f);
+    output.color    = input.color;
+    return output;
+}
+)";
+    vertexShader.entryPoint = "main";
+    vertexShader.stage = ShaderStage::Vertex;
 
-    auto* uiConfirm = uiContext->AddAction(InputMapper::Actions::UIConfirm, true);
-    uiConfirm->AddBinding(InputBinding::MakeKey(Key::Enter));
-    uiConfirm->AddBinding(InputBinding::MakeKey(Key::Space));
+    ShaderCode pixelShader;
+    pixelShader.source = R"(
+struct PSInput {
+    float4 position : SV_POSITION;
+    float4 color    : COLOR;
+};
 
-    auto* uiCancel = uiContext->AddAction(InputMapper::Actions::UICancel, true);
-    uiCancel->AddBinding(InputBinding::MakeKey(Key::Escape));
+float4 main(PSInput input) : SV_TARGET {
+    return input.color;
+}
+)";
+    pixelShader.entryPoint = "main";
+    pixelShader.stage = ShaderStage::Pixel;
 
-    DebugInputListener debugListener;
-    auto debugListenerId = inputManager.AddListener(debugListener, -100);
+    GraphicsPipelineCreateInfo pipelineInfo;
+    pipelineInfo.shaders = {vertexShader, pixelShader};
+    pipelineInfo.vertexAttributes = {
+        {"POSITION", 0},
+        {"COLOR", 12}
+    };
+    pipelineInfo.vertexStride = sizeof(Vertex);
+    pipelineInfo.topology = PrimitiveTopology::TriangleList;
+    pipelineInfo.depthTest = false;
+    pipelineInfo.depthWrite = false;
 
-    windowInput.SetCursorLocked(true);
-    windowInput.SetRawMouseMode(true);
+    U32 pipeline = graphics->CreateGraphicsPipeline(pipelineInfo);
 
-    U32 lastWidth = window.GetWidth();
-    U32 lastHeight = window.GetHeight();
+    Logger::Info("Starting render loop...");
 
-    bool isPaused = false;
-    bool showUI = false;
-
-    auto startTime = std::chrono::high_resolution_clock::now();
-    auto lastFrameTime = startTime;
-
-    Logger::Info("Input system initialized. Press ESC to toggle pause, F1 for UI");
-
-    while (!window.ShouldClose()) {
-
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        auto elapsed = std::chrono::duration<F64>(currentTime - startTime).count();
-        auto deltaTime = std::chrono::duration<F32>(currentTime - lastFrameTime).count();
-        lastFrameTime = currentTime;
-
-        inputManager.BeginFrame(elapsed);
+    while (!graphics->ShouldClose()) {
         window.PollEvents();
 
-        inputMapper.Update(inputManager);
+        graphics->BeginFrame();
 
-        if (window.GetWidth() != lastWidth || window.GetHeight() != lastHeight) {
-            lastWidth = window.GetWidth();
-            lastHeight = window.GetHeight();
-            renderer.OnResize(lastWidth, lastHeight);
-        }
+        RenderPassInfo passInfo;
+        passInfo.name = "Main Pass";
+        passInfo.clearColor = true;
+        passInfo.clearDepth = true;
+        passInfo.clearColorValue[0] = 0.0f;
+        passInfo.clearColorValue[1] = 0.2f;
+        passInfo.clearColorValue[2] = 0.4f;
+        passInfo.clearColorValue[3] = 1.0f;
 
-        if (inputMapper.IsActionJustPressed(InputMapper::Actions::Pause)) {
-            isPaused = !isPaused;
-            windowInput.SetCursorLocked(!isPaused);
-            windowInput.SetCursorVisible(isPaused);
-            gameContext->SetActive(!isPaused);
-            Logger::Info("Game {}", isPaused ? "paused" : "resumed");
-        }
+        graphics->BeginRenderPass(passInfo);
+        graphics->SetPipeline(pipeline);
+        graphics->SetVertexBuffer(vertexBuffer);
+        graphics->Draw(3);
+        graphics->EndRenderPass();
 
-        if (inputManager.IsKeyJustPressed(Key::F1)) {
-            showUI = !showUI;
-            uiContext->SetActive(showUI);
-            Logger::Info("UI {}", showUI ? "shown" : "hidden");
-        }
-
-        if (showUI) {
-            if (inputMapper.IsActionJustPressed(InputMapper::Actions::UIConfirm)) {
-                Logger::Info("UI Confirm pressed");
-            }
-            if (inputMapper.IsActionJustPressed(InputMapper::Actions::UICancel)) {
-                showUI = false;
-                uiContext->SetActive(false);
-                Logger::Info("UI closed");
-            }
-        }
-
-        if (inputManager.IsKeyJustPressed(Key::F3)) {
-            const auto& state = inputManager.GetState();
-            Logger::Debug("=== Input State Debug ===");
-            Logger::Debug("Mouse Position: ({}, {})", state.mouseX, state.mouseY);
-            Logger::Debug("Mouse Delta: ({}, {})", state.mouseDeltaX, state.mouseDeltaY);
-            Logger::Debug("Active Modifiers: {}", static_cast<U8>(state.modifiers));
-
-            std::string pressedKeys;
-            for (USize i = 0; i <= static_cast<USize>(Key::Last); ++i) {
-                if (state.keys[i]) {
-                    if (!pressedKeys.empty()) pressedKeys += ", ";
-                    pressedKeys += GetKeyName(static_cast<Key>(i));
-                }
-            }
-            Logger::Debug("Pressed Keys: {}", pressedKeys.empty() ? "None" : pressedKeys);
-        }
-
-        if (inputManager.IsKeyJustPressed(Key::F12)) {
-            Logger::Info("Screenshot requested (not implemented)");
-        }
-
-        inputManager.EndFrame();
-
-        renderer.BeginFrame();
-        pipeline.BeginFrame();
-        pipeline.DrawMesh(*triangleMesh);
-        renderer.EndFrame();
+        graphics->EndFrame();
     }
 
-    inputManager.RemoveListener(debugListenerId);
-
-    Logger::Info("Shutting down...");
+    Logger::Info("Application closing...");
 
     return 0;
 }
