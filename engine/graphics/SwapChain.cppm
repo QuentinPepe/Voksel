@@ -113,7 +113,7 @@ public:
     void SetVSync(bool enabled) { m_VSyncEnabled = enabled; }
 
 private:
-    void UpdateBackBuffers(ID3D12Device* device) {
+    void UpdateBackBuffers(ID3D12Device* /*device*/) {
         m_BackBuffers.resize(m_Config.bufferCount);
 
         for (U32 i = 0; i < m_Config.bufferCount; ++i) {

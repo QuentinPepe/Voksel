@@ -1,12 +1,11 @@
 add_executable(game
-    main.cpp
+        main.cpp
 )
 
-set(_VS_MOD_DIR "$ENV{VCToolsInstallDir}modules")
-set(_STD_IXX "${_VS_MOD_DIR}\\std.ixx")
-
+create_std_module_target()
 target_link_libraries(game
-    PRIVATE
+        PRIVATE
+        std_module
         voxel_engine
 )
 

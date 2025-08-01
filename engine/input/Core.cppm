@@ -4,7 +4,7 @@ import Core.Types;
 import std;
 
 export enum class Key : U16 {
-    Unknown = -1,
+    Unknown = static_cast<U16>(-1),
 
     Space = 32,
     Apostrophe = 39,
