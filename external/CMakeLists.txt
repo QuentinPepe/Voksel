@@ -42,6 +42,12 @@ if(WIN32)
             "$ENV{ProgramFiles}/Windows Kits/8.1/Lib/winv6.3/um/x64"
     )
 
+    find_library(DXGUID_LIBRARY dxguid.lib
+            HINTS
+            "$ENV{ProgramFiles}/Windows Kits/10/Lib/*/um/x64"
+            "$ENV{ProgramFiles}/Windows Kits/8.1/Lib/winv6.3/um/x64"
+    )
+
     find_library(PIX_LIBRARY WinPixEventRuntime.lib
             HINTS
             "$ENV{ProgramFiles}/Windows Kits/10/bin/*/x64"
@@ -61,6 +67,7 @@ if(WIN32)
             ${D3D12_LIBRARY}
             ${DXGI_LIBRARY}
             ${D3DCOMPILER_LIBRARY}
+            ${DXGUID_LIBRARY}
             $<$<BOOL:${PIX_LIBRARY}>:${PIX_LIBRARY}>
     )
 endif()

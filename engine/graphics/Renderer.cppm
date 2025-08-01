@@ -108,8 +108,6 @@ public:
         m_SwapChain.Resize(m_Device, window.GetWidth(), window.GetHeight());
 
         CreateRenderTargets();
-
-        Logger::Debug("Renderer resized to {}x{}", window.GetWidth(), window.GetHeight());
     }
 
     void ResetRenderGraph() {

@@ -36,19 +36,16 @@ private:
     Window* m_Window;
     std::unique_ptr<Renderer> m_Renderer;
 
-    // Resource storage
     std::vector<std::unique_ptr<Buffer>> m_VertexBuffers;
     std::vector<std::unique_ptr<Buffer>> m_IndexBuffers;
     std::vector<std::unique_ptr<GraphicsPipeline>> m_Pipelines;
     std::vector<std::unique_ptr<RootSignature>> m_RootSignatures;
 
-    // Current state
     U32 m_CurrentPipeline = INVALID_INDEX;
     U32 m_CurrentVertexBuffer = INVALID_INDEX;
     U32 m_CurrentIndexBuffer = INVALID_INDEX;
     bool m_InRenderPass = false;
 
-    // Render graph data
     struct FramePassData {
         std::vector<std::function<void(ID3D12GraphicsCommandList*)>> commands;
         RenderPassInfo passInfo;
@@ -94,12 +91,10 @@ public:
     }
 
     U32 CreateGraphicsPipeline(const GraphicsPipelineCreateInfo& info) override {
-        // Create root signature
         D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
         rootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
         auto rootSig = std::make_unique<RootSignature>(m_Renderer->GetDevice(), rootSigDesc);
 
-        // Compile shaders
         GraphicsPipelineDesc pipelineDesc;
 
         for (const auto& shader : info.shaders) {
@@ -121,14 +116,14 @@ public:
                 case ShaderStage::Geometry: pipelineDesc.geometryShader = bytecode; break;
                 case ShaderStage::Hull: pipelineDesc.hullShader = bytecode; break;
                 case ShaderStage::Domain: pipelineDesc.domainShader = bytecode; break;
+                default: break;
             }
         }
 
-        // Build input layout
         std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayout;
         for (const auto& [name, attrOffset] : info.vertexAttributes) {
-            DXGI_FORMAT format = DXGI_FORMAT_R32G32B32_FLOAT; // Default to float3
-            if (attrOffset == 12) format = DXGI_FORMAT_R32G32B32A32_FLOAT; // float4 for color
+            DXGI_FORMAT format = DXGI_FORMAT_R32G32B32_FLOAT;
+            if (attrOffset == 12) format = DXGI_FORMAT_R32G32B32A32_FLOAT;
 
             inputLayout.push_back({
                 name.c_str(), 0, format, 0, attrOffset,
@@ -137,7 +132,6 @@ public:
         }
         pipelineDesc.inputLayout = std::move(inputLayout);
 
-        // Set pipeline properties
         pipelineDesc.rootSignature = rootSig->GetRootSignature();
         pipelineDesc.primitiveTopology = ConvertTopology(info.topology);
         pipelineDesc.numRenderTargets = 1;
@@ -163,16 +157,11 @@ public:
     void BeginFrame() override {
         m_Renderer->BeginFrame();
         m_CurrentPassData = std::make_unique<FramePassData>();
-
-        // Reset render graph for new frame
         m_Renderer->ResetRenderGraph();
     }
 
     void EndFrame() override {
-        // Compile render graph with accumulated passes
         m_Renderer->GetRenderGraph().Compile();
-
-        // Execute render graph with accumulated commands
         m_Renderer->GetRenderGraph().Execute(m_Renderer->GetCurrentCommandList());
         m_Renderer->EndFrame();
         m_CurrentPassData.reset();
@@ -188,15 +177,12 @@ public:
         assert(m_InRenderPass, "Not in render pass");
         m_InRenderPass = false;
 
-        // Create a shared_ptr to transfer ownership to the lambda
         auto passData = std::make_shared<FramePassData>(std::move(*m_CurrentPassData));
         m_CurrentPassData = std::make_unique<FramePassData>();
 
         m_Renderer->GetRenderGraph().AddPass<FramePassData>(
             passData->passInfo.name,
-            [](RenderGraphBuilder&, FramePassData&) {
-                // No resource setup needed for simple forward pass
-            },
+            [](RenderGraphBuilder&, FramePassData&) {},
             [this, passData](const RenderGraphResources&, CommandList& cmdList, const FramePassData&) {
                 ExecuteRenderPass(cmdList, *passData);
             }
@@ -244,7 +230,6 @@ private:
     void ExecuteRenderPass(CommandList& cmdList, const FramePassData& passData) const {
         auto* cmd = cmdList.GetCommandList();
 
-        // Set viewport and scissor
         D3D12_VIEWPORT viewport = {
             0.0f, 0.0f,
             static_cast<float>(m_Renderer->GetSwapChain().GetWidth()),
@@ -260,17 +245,14 @@ private:
         cmd->RSSetViewports(1, &viewport);
         cmd->RSSetScissorRects(1, &scissor);
 
-        // Transition render target
         Resource rtResource(m_Renderer->GetCurrentRenderTarget(), D3D12_RESOURCE_STATE_PRESENT, ResourceType::Texture2D);
         rtResource.SetTracked(true);
         cmdList.TransitionResource(rtResource, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-        // Set render targets
         auto rtvHandle = m_Renderer->GetCurrentRTV();
         auto dsvHandle = m_Renderer->GetDSV();
         cmd->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
-        // Clear if requested
         if (passData.passInfo.clearColor) {
             cmd->ClearRenderTargetView(rtvHandle, passData.passInfo.clearColorValue, 0, nullptr);
         }
@@ -278,22 +260,19 @@ private:
             cmd->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, passData.passInfo.clearDepthValue, 0, 0, nullptr);
         }
 
-        // Set current pipeline
         if (m_CurrentPipeline != INVALID_INDEX) {
             m_Pipelines[m_CurrentPipeline]->Bind(cmd);
             cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         }
 
-        // Set vertex buffer
         if (m_CurrentVertexBuffer != INVALID_INDEX) {
             D3D12_VERTEX_BUFFER_VIEW vbView;
             vbView.BufferLocation = m_VertexBuffers[m_CurrentVertexBuffer]->GetGPUAddress();
             vbView.SizeInBytes = static_cast<UINT>(m_VertexBuffers[m_CurrentVertexBuffer]->GetDesc().size);
-            vbView.StrideInBytes = sizeof(Vertex); // TODO: Get from pipeline info
+            vbView.StrideInBytes = sizeof(Vertex);
             cmd->IASetVertexBuffers(0, 1, &vbView);
         }
 
-        // Set index buffer
         if (m_CurrentIndexBuffer != INVALID_INDEX) {
             D3D12_INDEX_BUFFER_VIEW ibView;
             ibView.BufferLocation = m_IndexBuffers[m_CurrentIndexBuffer]->GetGPUAddress();
@@ -302,12 +281,10 @@ private:
             cmd->IASetIndexBuffer(&ibView);
         }
 
-        // Execute recorded commands
         for (const auto& command : passData.commands) {
             command(cmd);
         }
 
-        // Transition back to present
         cmdList.TransitionResource(rtResource, D3D12_RESOURCE_STATE_PRESENT);
     }
 
