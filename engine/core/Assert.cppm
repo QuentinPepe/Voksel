@@ -11,7 +11,7 @@ export struct SourceLocation {
 };
 
 export void assert_fail(const char* expr, const SourceLocation& loc) {
-    Logger::Critical("Assertion failed: {} in {} at {}:{}:{}",
+    Logger::Critical(LogSystem, "Assertion failed: {} in {} at {}:{}:{}",
                      expr, loc.function_name, loc.file_name, loc.line, loc.column);
 
 #if defined(_MSC_VER)

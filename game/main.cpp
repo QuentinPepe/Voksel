@@ -9,7 +9,7 @@ import Input.Window;
 import std;
 
 int main() {
-    Logger::SetLevel(LogLevel::Debug);
+    Logger::EnableColor(false);
     Logger::Info("Starting the Voksel Engine v{}.{}.{}", 0, 1, 0);
 
     WindowConfig windowConfig{};
