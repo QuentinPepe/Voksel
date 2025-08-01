@@ -20,6 +20,7 @@ import Graphics.DX12.Resource;
 import Graphics.DX12.RenderGraph;
 import Graphics.DX12.CommandList;
 import Graphics.DX12.DescriptorHeap;
+import Graphics.DX12.ShaderManager;
 import Core.Types;
 import Core.Assert;
 import std;
@@ -35,6 +36,7 @@ class DX12GraphicsContext : public IGraphicsContext {
 private:
     Window* m_Window;
     std::unique_ptr<Renderer> m_Renderer;
+    std::unique_ptr<ShaderManager> m_ShaderManager;
 
     std::vector<std::unique_ptr<Buffer>> m_VertexBuffers;
     std::vector<std::unique_ptr<Buffer>> m_IndexBuffers;
@@ -60,6 +62,8 @@ public:
 
         m_Renderer = std::make_unique<Renderer>(window, rendererConfig);
         m_Renderer->GetSwapChain().SetVSync(config.enableVSync);
+
+        m_ShaderManager = std::make_unique<ShaderManager>("shaders");
     }
 
     U32 CreateVertexBuffer(const void* data, U64 size) override {
@@ -97,6 +101,7 @@ public:
 
         GraphicsPipelineDesc pipelineDesc;
 
+        // Use ShaderManager for compilation if shader source is provided
         for (const auto& shader : info.shaders) {
             std::string target;
             switch (shader.stage) {
@@ -108,7 +113,21 @@ public:
                 default: assert(false, "Invalid shader stage for graphics pipeline");
             }
 
-            auto bytecode = CompileShader(shader.source, shader.entryPoint, target);
+            ShaderBytecode bytecode;
+
+            // Check if this is a file path or direct source
+            if (shader.source.find('\n') == std::string::npos && shader.source.ends_with(".hlsl")) {
+                // It's a file path
+                bytecode = m_ShaderManager->LoadShader(shader.source, shader.entryPoint, target);
+            } else {
+                // It's inline source code
+                bytecode = m_ShaderManager->CompileShaderFromSource(
+                    shader.source,
+                    "inline_shader",
+                    shader.entryPoint,
+                    target
+                );
+            }
 
             switch (shader.stage) {
                 case ShaderStage::Vertex: pipelineDesc.vertexShader = bytecode; break;
@@ -225,6 +244,8 @@ public:
     bool ShouldClose() const override {
         return m_Window->ShouldClose();
     }
+
+    ShaderManager* GetShaderManager() { return m_ShaderManager.get(); }
 
 private:
     void ExecuteRenderPass(CommandList& cmdList, const FramePassData& passData) const {

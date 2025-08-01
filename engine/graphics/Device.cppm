@@ -21,7 +21,7 @@ export struct DeviceConfig {
 
 export class Device {
 public:
-    Device() : Device(DeviceConfig{}) {}
+    Device() : Device{DeviceConfig{}} {}
 
     explicit Device(const DeviceConfig& config) {
         InitializeFactory(config);
@@ -110,7 +110,7 @@ public:
     bool SupportsVariableRateShading() const { return m_Features.variableRateShading; }
 
 private:
-    void InitializeFactory(const DeviceConfig& config) {
+    void InitializeFactory(const DeviceConfig& /*config*/) {
         UINT dxgiFactoryFlags = 0;
 
 #ifdef _DEBUG
