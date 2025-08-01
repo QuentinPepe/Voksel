@@ -99,11 +99,11 @@ public:
         m_CommandList->CopyResource(dst, src);
     }
 
-    void CopyBufferRegion(ID3D12Resource* dst, U64 dstOffset, ID3D12Resource* src, U64 srcOffset, U64 size) {
+    void CopyBufferRegion(ID3D12Resource* dst, U64 dstOffset, ID3D12Resource* src, U64 srcOffset, U64 size) const {
         m_CommandList->CopyBufferRegion(dst, dstOffset, src, srcOffset, size);
     }
 
-    void SetDescriptorHeaps(U32 count, ID3D12DescriptorHeap* const* heaps) {
+    void SetDescriptorHeaps(U32 count, ID3D12DescriptorHeap* const* heaps) const {
         m_CommandList->SetDescriptorHeaps(count, heaps);
     }
 

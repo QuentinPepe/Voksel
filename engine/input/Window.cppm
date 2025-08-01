@@ -156,6 +156,8 @@ private:
     InputManager* m_InputManager;
     UniquePtr<WindowUserData> m_UserData;
 
+    std::function<void(U32, U32)> m_ResizeCallback;
+
     bool m_CursorVisible = true;
     bool m_CursorLocked = false;
     F64 m_LastMouseX = 0.0;
@@ -220,10 +222,14 @@ private:
     static void FramebufferSizeCallback(GLFWwindow* window, int width, int height) {
         auto* userData = static_cast<WindowUserData*>(glfwGetWindowUserPointer(window));
         if (userData && userData->window) {
-
             userData->window->UpdateDimensions(width, height);
+
+            if (userData->inputHandler && userData->inputHandler->m_ResizeCallback) {
+                userData->inputHandler->m_ResizeCallback(static_cast<U32>(width), static_cast<U32>(height));
+            }
         }
     }
+
 
 public:
     WindowInputHandler(Window* window, InputManager* inputManager)
@@ -260,6 +266,10 @@ public:
         glfwSetFramebufferSizeCallback(glfwWindow, nullptr);
 
         glfwSetWindowUserPointer(glfwWindow, nullptr);
+    }
+
+    void SetResizeCallback(std::function<void(U32, U32)> callback) {
+        m_ResizeCallback = std::move(callback);
     }
 
     void SetCursorVisible(bool visible) {

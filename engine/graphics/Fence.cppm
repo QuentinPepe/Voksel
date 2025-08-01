@@ -38,14 +38,14 @@ public:
         return value;
     }
 
-    void WaitCPU(U64 value) {
+    void WaitCPU(U64 value) const {
         if (m_Fence->GetCompletedValue() < value) {
             assert(SUCCEEDED(m_Fence->SetEventOnCompletion(value, m_Event)), "Failed to set fence event");
             WaitForSingleObject(m_Event, INFINITE);
         }
     }
 
-    void WaitGPU(ID3D12CommandQueue* queue, U64 value) {
+    void WaitGPU(ID3D12CommandQueue* queue, U64 value) const {
         assert(SUCCEEDED(queue->Wait(m_Fence.Get(), value)), "Failed to wait on fence");
     }
 

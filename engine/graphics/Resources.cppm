@@ -135,7 +135,7 @@ public:
         }
     }
 
-    void UpdateData(const void* data, U64 size, U64 offset = 0) {
+    void UpdateData(const void* data, U64 size, U64 offset = 0) const {
         assert(m_MappedData, "Buffer is not CPU accessible");
         assert(offset + size <= m_Desc.size, "Update exceeds buffer size");
         std::memcpy(static_cast<U8*>(m_MappedData) + offset, data, size);
@@ -169,8 +169,9 @@ public:
         resourceDesc.Dimension = desc.dimension;
         resourceDesc.Width = desc.width;
         resourceDesc.Height = desc.height;
-        resourceDesc.DepthOrArraySize = (desc.dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D) ? desc.depth : desc.arraySize;
-        resourceDesc.MipLevels = desc.mipLevels;
+        resourceDesc.DepthOrArraySize = static_cast<UINT16>(
+            (desc.dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D) ? desc.depth : desc.arraySize);
+        resourceDesc.MipLevels = static_cast<UINT16>(desc.mipLevels);
         resourceDesc.Format = desc.format;
         resourceDesc.SampleDesc = {1, 0};
         resourceDesc.Layout = desc.layout;

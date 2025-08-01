@@ -114,10 +114,6 @@ public:
         }
     }
 
-    void EndFrame() {
-        Logger::Trace("InputManager::EndFrame - {} key events processed", m_KeyEvents.size());
-    }
-
     void InjectKeyEvent(Key key, S32 scancode, InputEventAction action, ModifierKey mods) {
         m_KeyEvents.push_back({key, scancode, action, mods, m_CurrentState.currentTime});
     }

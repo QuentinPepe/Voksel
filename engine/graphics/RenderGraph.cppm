@@ -73,15 +73,15 @@ public:
     RenderGraphBuilder(RenderGraph* graph, U32 passIndex)
         : m_Graph{graph}, m_PassIndex{passIndex} {}
 
-    RenderGraphResourceHandle CreateBuffer(const std::string& name, const BufferDesc& desc);
-    RenderGraphResourceHandle CreateTexture(const std::string& name, const TextureDesc& desc);
-    RenderGraphResourceHandle ImportBuffer(const std::string& name, Buffer* buffer);
-    RenderGraphResourceHandle ImportTexture(const std::string& name, Texture* texture);
+    RenderGraphResourceHandle CreateBuffer(const std::string& name, const BufferDesc& desc) const;
+    RenderGraphResourceHandle CreateTexture(const std::string& name, const TextureDesc& desc) const;
+    RenderGraphResourceHandle ImportBuffer(const std::string& name, Buffer* buffer) const;
+    RenderGraphResourceHandle ImportTexture(const std::string& name, Texture* texture) const;
 
-    void ReadBuffer(RenderGraphResourceHandle handle);
-    void WriteBuffer(RenderGraphResourceHandle handle);
-    void ReadTexture(RenderGraphResourceHandle handle);
-    void WriteTexture(RenderGraphResourceHandle handle);
+    void ReadBuffer(RenderGraphResourceHandle handle) const;
+    void WriteBuffer(RenderGraphResourceHandle handle) const;
+    void ReadTexture(RenderGraphResourceHandle handle) const;
+    void WriteTexture(RenderGraphResourceHandle handle) const;
 };
 
 export class RenderGraphResources {
@@ -107,7 +107,7 @@ public:
         return static_cast<Texture*>(node.resource.get());
     }
 
-    CommandList& GetCommandList() { return *m_CommandList; }
+    CommandList& GetCommandList() const { return *m_CommandList; }
 };
 
 export class RenderGraph {
@@ -474,15 +474,15 @@ private:
 };
 
 // RenderGraphBuilder implementation
-RenderGraphResourceHandle RenderGraphBuilder::CreateBuffer(const std::string& name, const BufferDesc& desc) {
+RenderGraphResourceHandle RenderGraphBuilder::CreateBuffer(const std::string& name, const BufferDesc& desc) const {
     return m_Graph->CreateResource(m_PassIndex, name, desc);
 }
 
-RenderGraphResourceHandle RenderGraphBuilder::CreateTexture(const std::string& name, const TextureDesc& desc) {
+RenderGraphResourceHandle RenderGraphBuilder::CreateTexture(const std::string& name, const TextureDesc& desc) const {
     return m_Graph->CreateResource(m_PassIndex, name, desc);
 }
 
-RenderGraphResourceHandle RenderGraphBuilder::ImportBuffer(const std::string& name, Buffer* buffer) {
+RenderGraphResourceHandle RenderGraphBuilder::ImportBuffer(const std::string& name, Buffer* buffer) const {
     U32 index = static_cast<U32>(m_Graph->m_Resources.size());
     m_Graph->m_Resources.emplace_back(name, buffer->GetDesc());
     m_Graph->m_Resources.back().resource.reset(buffer);
@@ -495,7 +495,7 @@ RenderGraphResourceHandle RenderGraphBuilder::ImportBuffer(const std::string& na
     return handle;
 }
 
-RenderGraphResourceHandle RenderGraphBuilder::ImportTexture(const std::string& name, Texture* texture) {
+RenderGraphResourceHandle RenderGraphBuilder::ImportTexture(const std::string& name, Texture* texture) const {
     U32 index = static_cast<U32>(m_Graph->m_Resources.size());
     m_Graph->m_Resources.emplace_back(name, texture->GetDesc());
     m_Graph->m_Resources.back().resource.reset(texture);
@@ -508,25 +508,25 @@ RenderGraphResourceHandle RenderGraphBuilder::ImportTexture(const std::string& n
     return handle;
 }
 
-void RenderGraphBuilder::ReadBuffer(RenderGraphResourceHandle handle) {
+void RenderGraphBuilder::ReadBuffer(RenderGraphResourceHandle handle) const {
     assert(handle.IsValid(), "Invalid resource handle");
     m_Graph->m_Passes[m_PassIndex].reads.push_back(handle);
     m_Graph->m_Resources[handle.index].readerPasses.push_back(m_PassIndex);
 }
 
-void RenderGraphBuilder::WriteBuffer(RenderGraphResourceHandle handle) {
+void RenderGraphBuilder::WriteBuffer(RenderGraphResourceHandle handle) const {
     assert(handle.IsValid(), "Invalid resource handle");
     m_Graph->m_Passes[m_PassIndex].writes.push_back(handle);
     m_Graph->m_Resources[handle.index].writerPasses.push_back(m_PassIndex);
 }
 
-void RenderGraphBuilder::ReadTexture(RenderGraphResourceHandle handle) {
+void RenderGraphBuilder::ReadTexture(RenderGraphResourceHandle handle) const {
     assert(handle.IsValid(), "Invalid resource handle");
     m_Graph->m_Passes[m_PassIndex].reads.push_back(handle);
     m_Graph->m_Resources[handle.index].readerPasses.push_back(m_PassIndex);
 }
 
-void RenderGraphBuilder::WriteTexture(RenderGraphResourceHandle handle) {
+void RenderGraphBuilder::WriteTexture(RenderGraphResourceHandle handle) const {
     assert(handle.IsValid(), "Invalid resource handle");
     m_Graph->m_Passes[m_PassIndex].writes.push_back(handle);
     m_Graph->m_Resources[handle.index].writerPasses.push_back(m_PassIndex);

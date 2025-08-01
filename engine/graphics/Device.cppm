@@ -30,9 +30,9 @@ private:
         U32 familyIndex;
     };
 
-    QueueInfo m_DirectQueue;
-    QueueInfo m_ComputeQueue;
-    QueueInfo m_CopyQueue;
+    QueueInfo m_DirectQueue{};
+    QueueInfo m_ComputeQueue{};
+    QueueInfo m_CopyQueue{};
 
 public:
     explicit Device(const DeviceConfig& config) {
@@ -134,7 +134,24 @@ public:
         Logger::Info("D3D12 Device created successfully");
     }
 
-    ~Device() {}
+    ~Device() {
+        // Wait for GPU to finish all work before destroying
+        if (m_DirectQueue.queue) {
+            m_DirectQueue.queue->Signal(nullptr, 1);
+        }
+        if (m_ComputeQueue.queue) {
+            m_ComputeQueue.queue->Signal(nullptr, 1);
+        }
+        if (m_CopyQueue.queue) {
+            m_CopyQueue.queue->Signal(nullptr, 1);
+        }
+
+        // ComPtr will handle cleanup automatically
+        // But we ensure queues are released before device
+        m_DirectQueue.queue.Reset();
+        m_ComputeQueue.queue.Reset();
+        m_CopyQueue.queue.Reset();
+    }
 
     [[nodiscard]] ID3D12Device8* GetDevice() const { return m_Device.Get(); }
     [[nodiscard]] IDXGIFactory7* GetFactory() const { return m_Factory.Get(); }

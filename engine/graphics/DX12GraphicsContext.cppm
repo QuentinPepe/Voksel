@@ -241,7 +241,7 @@ public:
     }
 
 private:
-    void ExecuteRenderPass(CommandList& cmdList, const FramePassData& passData) {
+    void ExecuteRenderPass(CommandList& cmdList, const FramePassData& passData) const {
         auto* cmd = cmdList.GetCommandList();
 
         // Set viewport and scissor
