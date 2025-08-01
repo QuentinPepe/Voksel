@@ -142,6 +142,13 @@ public:
         };
     }
 
+    void Clear() {
+        m_Resources.clear();
+        m_Passes.clear();
+        m_ExecutionOrder.clear();
+        m_ResourceVersionCounter = 0;
+    }
+
     void Compile() {
         // Phase 1: Execute setup functions
         for (U32 i = 0; i < m_Passes.size(); ++i) {
@@ -161,7 +168,7 @@ public:
         // Phase 5: Calculate resource lifetimes
         CalculateResourceLifetimes();
 
-        Logger::Debug("Render graph compiled: {} passes, {} resources",
+        Logger::Trace("Render graph compiled: {} passes, {} resources",
                      std::ranges::count_if(m_Passes, [](const auto& p) { return !p.isCulled; }),
                      std::ranges::count_if(m_Resources, [](const auto& r) { return !r.isCulled; }));
     }

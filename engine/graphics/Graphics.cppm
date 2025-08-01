@@ -85,7 +85,7 @@ export struct GraphicsConfig {
 
 export std::unique_ptr<IGraphicsContext> CreateDX12GraphicsContext(Window& window, const GraphicsConfig& config);
 
-export std::unique_ptr<IGraphicsContext> CreateGraphicsContext(Window& window, const GraphicsConfig& config) {
+export inline std::unique_ptr<IGraphicsContext> CreateGraphicsContext(Window& window, const GraphicsConfig& config) {
     // For now, always use DX12 on Windows
     return CreateDX12GraphicsContext(window, config);
 }

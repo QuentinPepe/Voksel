@@ -48,6 +48,7 @@ private:
 
     Array<DescriptorHandle, FRAME_COUNT> m_RtvHandles;
 
+    // Keep a single RenderGraph instance instead of recreating
     std::unique_ptr<RenderGraph> m_RenderGraph;
 
 public:
@@ -69,7 +70,7 @@ public:
         // Create render targets
         CreateRenderTargets();
 
-        // Create render graph
+        // Create render graph once
         m_RenderGraph = std::make_unique<RenderGraph>(m_Device);
 
         Logger::Info("Renderer initialized");
@@ -83,6 +84,9 @@ public:
 
         // Reset allocators and lists
         frameData.commandList->Begin();
+
+        // Clear the render graph instead of recreating it
+        ClearRenderGraph();
     }
 
     void EndFrame() {
@@ -120,7 +124,8 @@ public:
     }
 
     void ResetRenderGraph() {
-        m_RenderGraph = std::make_unique<RenderGraph>(m_Device);
+        // This was causing memory issues - now we clear instead
+        ClearRenderGraph();
     }
 
     [[nodiscard]] Device& GetDevice() { return m_Device; }
@@ -167,5 +172,12 @@ private:
             &dsvDesc,
             m_DepthHandle.cpuHandle
         );
+    }
+
+    void ClearRenderGraph() {
+        // Clear the existing render graph data instead of recreating
+        if (m_RenderGraph) {
+            m_RenderGraph->Clear();
+        }
     }
 };

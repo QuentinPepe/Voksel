@@ -53,7 +53,9 @@ public:
     InputManager() = default;
 
     void BeginFrame(F64 currentTime) {
+
         m_PreviousState = m_CurrentState;
+
         m_CurrentState.deltaTime = currentTime - m_LastFrameTime;
         m_CurrentState.currentTime = currentTime;
         m_LastFrameTime = currentTime;
@@ -68,23 +70,68 @@ public:
         m_MouseMoveEvents.clear();
         m_MouseScrollEvents.clear();
         m_TextInputEvents.clear();
+
+        Logger::Trace("InputManager::BeginFrame at time {}", currentTime);
+    }
+
+    void ProcessEvents() {
+        UpdateSortedListeners();
+
+        for (const auto& event : m_KeyEvents) {
+            if (event.action == InputEventAction::Press) {
+                m_CurrentState.keys[static_cast<USize>(event.key)] = true;
+                m_CurrentState.keyPressTime[static_cast<USize>(event.key)] = event.timestamp;
+                Logger::Trace("Processing key press: {} at time {}", GetKeyName(event.key), event.timestamp);
+            } else if (event.action == InputEventAction::Release) {
+                m_CurrentState.keys[static_cast<USize>(event.key)] = false;
+                Logger::Trace("Processing key release: {} at time {}", GetKeyName(event.key), event.timestamp);
+            }
+
+            m_CurrentState.modifiers = event.mods;
+
+            if (!DispatchEvent(event, &ListenerEntry::onKey)) break;
+        }
+
+        for (const auto& event : m_MouseButtonEvents) {
+            if (event.action == InputEventAction::Press) {
+                m_CurrentState.mouseButtons[static_cast<USize>(event.button)] = true;
+                m_CurrentState.mousePressTime[static_cast<USize>(event.button)] = event.timestamp;
+            } else if (event.action == InputEventAction::Release) {
+                m_CurrentState.mouseButtons[static_cast<USize>(event.button)] = false;
+            }
+
+            m_CurrentState.modifiers = event.mods;
+
+            if (!DispatchEvent(event, &ListenerEntry::onMouseButton)) break;
+        }
+
+        for (const auto& event : m_MouseMoveEvents) {
+            if (!DispatchEvent(event, &ListenerEntry::onMouseMove)) break;
+        }
+
+        for (const auto& event : m_MouseScrollEvents) {
+            if (!DispatchEvent(event, &ListenerEntry::onMouseScroll)) break;
+        }
+
+        for (const auto& event : m_TextInputEvents) {
+            if (!DispatchEvent(event, &ListenerEntry::onTextInput)) break;
+        }
+
+        Logger::Trace("InputManager::ProcessEvents - {} key events processed", m_KeyEvents.size());
     }
 
     void EndFrame() {
-        ProcessEvents();
+        Logger::Trace("InputManager::EndFrame - {} key events processed", m_KeyEvents.size());
     }
 
     void InjectKeyEvent(Key key, S32 scancode, InputEventAction action, ModifierKey mods) {
         m_KeyEvents.push_back({key, scancode, action, mods, m_CurrentState.currentTime});
 
         if (action == InputEventAction::Press) {
-            m_CurrentState.keys[static_cast<USize>(key)] = true;
-            m_CurrentState.keyPressTime[static_cast<USize>(key)] = m_CurrentState.currentTime;
+            Logger::Trace("Key pressed: {} at time {} (queued)", GetKeyName(key), m_CurrentState.currentTime);
         } else if (action == InputEventAction::Release) {
-            m_CurrentState.keys[static_cast<USize>(key)] = false;
+            Logger::Trace("Key released: {} at time {} (queued)", GetKeyName(key), m_CurrentState.currentTime);
         }
-
-        m_CurrentState.modifiers = mods;
     }
 
     void InjectMouseButtonEvent(MouseButton button, InputEventAction action, ModifierKey mods) {
@@ -93,15 +140,6 @@ public:
             m_CurrentState.mouseX, m_CurrentState.mouseY,
             m_CurrentState.currentTime
         });
-
-        if (action == InputEventAction::Press) {
-            m_CurrentState.mouseButtons[static_cast<USize>(button)] = true;
-            m_CurrentState.mousePressTime[static_cast<USize>(button)] = m_CurrentState.currentTime;
-        } else if (action == InputEventAction::Release) {
-            m_CurrentState.mouseButtons[static_cast<USize>(button)] = false;
-        }
-
-        m_CurrentState.modifiers = mods;
     }
 
     void InjectMouseMoveEvent(F64 x, F64 y) {
@@ -166,7 +204,16 @@ public:
     }
 
     [[nodiscard]] bool IsKeyJustPressed(Key key) const {
-        return m_CurrentState.IsKeyPressed(key) && !m_PreviousState.IsKeyPressed(key);
+        bool isPressed = m_CurrentState.IsKeyPressed(key);
+        bool wasPressed = m_PreviousState.IsKeyPressed(key);
+        bool result = isPressed && !wasPressed;
+
+        if (key == Key::Escape || key == Key::F1 || key == Key::F2) {
+            Logger::Trace("IsKeyJustPressed({}) - current: {}, previous: {}, result: {}",
+                         GetKeyName(key), isPressed, wasPressed, result);
+        }
+
+        return result;
     }
 
     [[nodiscard]] bool IsKeyJustReleased(Key key) const {
@@ -231,30 +278,6 @@ public:
     }
 
 private:
-    void ProcessEvents() {
-        UpdateSortedListeners();
-
-        for (const auto& event : m_KeyEvents) {
-            if (!DispatchEvent(event, &ListenerEntry::onKey)) break;
-        }
-
-        for (const auto& event : m_MouseButtonEvents) {
-            if (!DispatchEvent(event, &ListenerEntry::onMouseButton)) break;
-        }
-
-        for (const auto& event : m_MouseMoveEvents) {
-            if (!DispatchEvent(event, &ListenerEntry::onMouseMove)) break;
-        }
-
-        for (const auto& event : m_MouseScrollEvents) {
-            if (!DispatchEvent(event, &ListenerEntry::onMouseScroll)) break;
-        }
-
-        for (const auto& event : m_TextInputEvents) {
-            if (!DispatchEvent(event, &ListenerEntry::onTextInput)) break;
-        }
-    }
-
     template<typename EventType>
     bool DispatchEvent(const EventType& event,
                       std::function<void(const EventType&)> ListenerEntry::* memberPtr) {
