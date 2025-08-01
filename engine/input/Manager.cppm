@@ -70,8 +70,6 @@ public:
         m_MouseMoveEvents.clear();
         m_MouseScrollEvents.clear();
         m_TextInputEvents.clear();
-
-        Logger::Trace("InputManager::BeginFrame at time {}", currentTime);
     }
 
     void ProcessEvents() {
@@ -81,10 +79,8 @@ public:
             if (event.action == InputEventAction::Press) {
                 m_CurrentState.keys[static_cast<USize>(event.key)] = true;
                 m_CurrentState.keyPressTime[static_cast<USize>(event.key)] = event.timestamp;
-                Logger::Trace("Processing key press: {} at time {}", GetKeyName(event.key), event.timestamp);
             } else if (event.action == InputEventAction::Release) {
                 m_CurrentState.keys[static_cast<USize>(event.key)] = false;
-                Logger::Trace("Processing key release: {} at time {}", GetKeyName(event.key), event.timestamp);
             }
 
             m_CurrentState.modifiers = event.mods;
@@ -116,8 +112,6 @@ public:
         for (const auto& event : m_TextInputEvents) {
             if (!DispatchEvent(event, &ListenerEntry::onTextInput)) break;
         }
-
-        Logger::Trace("InputManager::ProcessEvents - {} key events processed", m_KeyEvents.size());
     }
 
     void EndFrame() {
@@ -126,12 +120,6 @@ public:
 
     void InjectKeyEvent(Key key, S32 scancode, InputEventAction action, ModifierKey mods) {
         m_KeyEvents.push_back({key, scancode, action, mods, m_CurrentState.currentTime});
-
-        if (action == InputEventAction::Press) {
-            Logger::Trace("Key pressed: {} at time {} (queued)", GetKeyName(key), m_CurrentState.currentTime);
-        } else if (action == InputEventAction::Release) {
-            Logger::Trace("Key released: {} at time {} (queued)", GetKeyName(key), m_CurrentState.currentTime);
-        }
     }
 
     void InjectMouseButtonEvent(MouseButton button, InputEventAction action, ModifierKey mods) {
@@ -207,11 +195,6 @@ public:
         bool isPressed = m_CurrentState.IsKeyPressed(key);
         bool wasPressed = m_PreviousState.IsKeyPressed(key);
         bool result = isPressed && !wasPressed;
-
-        if (key == Key::Escape || key == Key::F1 || key == Key::F2) {
-            Logger::Trace("IsKeyJustPressed({}) - current: {}, previous: {}, result: {}",
-                         GetKeyName(key), isPressed, wasPressed, result);
-        }
 
         return result;
     }
