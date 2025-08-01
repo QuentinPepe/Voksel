@@ -181,7 +181,7 @@ public:
         // Phase 5: Calculate resource lifetimes
         CalculateResourceLifetimes();
 
-        Logger::Trace("Render graph compiled: {} passes, {} resources",
+        Logger::Trace(LogGraphics, "Render graph compiled: {} passes, {} resources",
                       std::ranges::count_if(m_Passes, [](const auto &p) { return !p.isCulled; }),
                       std::ranges::count_if(m_Resources, [](const auto &r) { return !r.isCulled; }));
     }

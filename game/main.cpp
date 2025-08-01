@@ -10,7 +10,7 @@ import std;
 
 int main() {
     Logger::EnableColor(false);
-    Logger::Info("Starting the Voksel Engine v{}.{}.{}", 0, 1, 0);
+    Logger::Info(LogGame, "Starting the Voksel Engine v{}.{}.{}", 0, 1, 0);
 
     WindowConfig windowConfig{};
     windowConfig.width = 1280;
@@ -72,7 +72,7 @@ int main() {
 
     }
 
-    Logger::Info("Application closing...");
+    Logger::Info(LogGame, "Application closing...");
 
     return 0;
 }

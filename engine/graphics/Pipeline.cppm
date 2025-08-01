@@ -49,7 +49,7 @@ export ShaderBytecode CompileShader(const std::string& source, const std::string
 
     if (FAILED(hr)) {
         if (errorBlob) {
-            Logger::Error("Shader compilation failed: {}", static_cast<const char*>(errorBlob->GetBufferPointer()));
+            Logger::Error(LogGraphics, "Shader compilation failed: {}", static_cast<const char*>(errorBlob->GetBufferPointer()));
         }
         assert(false, "Failed to compile shader");
     }
@@ -183,7 +183,7 @@ public:
 
         if (FAILED(hr)) {
             if (error) {
-                Logger::Error("Root signature serialization failed: {}", static_cast<const char*>(error->GetBufferPointer()));
+                Logger::Error(LogGraphics, "Root signature serialization failed: {}", static_cast<const char*>(error->GetBufferPointer()));
             }
             assert(false, "Failed to serialize root signature");
         }

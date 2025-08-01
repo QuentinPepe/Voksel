@@ -54,13 +54,13 @@ private:
             }
 
             if (filePath.empty()) {
-                Logger::Error("Failed to find include file: {}", pFileName);
+                Logger::Error(LogGraphics, "Failed to find include file: {}", pFileName);
                 return E_FAIL;
             }
 
             std::ifstream file(filePath, std::ios::binary | std::ios::ate);
             if (!file.is_open()) {
-                Logger::Error("Failed to open include file: {}", filePath.string());
+                Logger::Error(LogGraphics, "Failed to open include file: {}", filePath.string());
                 return E_FAIL;
             }
 
@@ -87,18 +87,18 @@ public:
         : m_ShaderDirectory{shaderDirectory} {
 
         if (!std::filesystem::exists(m_ShaderDirectory)) {
-            Logger::Warn("Shader directory '{}' does not exist", m_ShaderDirectory.string());
+            Logger::Warn(LogGraphics, "Shader directory '{}' does not exist", m_ShaderDirectory.string());
         }
 
         m_IncludePaths.push_back(m_ShaderDirectory);
         m_IncludePaths.push_back(m_ShaderDirectory / "Include");
 
-        Logger::Info("ShaderManager initialized with directory: {}", m_ShaderDirectory.string());
+        Logger::Info(LogGraphics, "ShaderManager initialized with directory: {}", m_ShaderDirectory.string());
     }
 
     void AddIncludePath(const std::filesystem::path& path) {
         m_IncludePaths.push_back(path);
-        Logger::Debug("Added shader include path: {}", path.string());
+        Logger::Debug(LogGraphics, "Added shader include path: {}", path.string());
     }
 
     void SetEnableHotReload(bool enable) {
@@ -115,10 +115,10 @@ public:
         if (m_EnableHotReload && m_Cache.contains(cacheKey)) {
             auto lastWriteTime = std::filesystem::last_write_time(filePath);
             if (lastWriteTime <= m_Cache[cacheKey].lastModified) {
-                Logger::Debug("Using cached shader: {}", filename);
+                Logger::Debug(LogGraphics, "Using cached shader: {}", filename);
                 return m_Cache[cacheKey].bytecode;
             }
-            Logger::Info("Shader file modified, recompiling: {}", filename);
+            Logger::Info(LogGraphics, "Shader file modified, recompiling: {}", filename);
         }
 
         std::string source = ReadShaderFile(filePath);
@@ -178,7 +178,7 @@ public:
             if (errorBlob) {
                 std::string errorMsg(static_cast<const char*>(errorBlob->GetBufferPointer()),
                                    errorBlob->GetBufferSize());
-                Logger::Error("Shader compilation failed for '{}':\n{}", sourceName, errorMsg);
+                Logger::Error(LogGraphics, "Shader compilation failed for '{}':\n{}", sourceName, errorMsg);
             }
             assert(false, "Failed to compile shader");
         }
@@ -186,14 +186,14 @@ public:
         if (errorBlob && errorBlob->GetBufferSize() > 0) {
             std::string warningMsg(static_cast<const char*>(errorBlob->GetBufferPointer()),
                                  errorBlob->GetBufferSize());
-            Logger::Warn("Shader compilation warnings for '{}':\n{}", sourceName, warningMsg);
+            Logger::Warn(LogGraphics, "Shader compilation warnings for '{}':\n{}", sourceName, warningMsg);
         }
 
         ShaderBytecode bytecode;
         bytecode.data.resize(shaderBlob->GetBufferSize());
         std::memcpy(bytecode.data.data(), shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize());
 
-        Logger::Debug("Successfully compiled shader: {} ({})", sourceName, target);
+        Logger::Debug(LogGraphics, "Successfully compiled shader: {} ({})", sourceName, target);
 
         return bytecode;
     }
@@ -240,14 +240,14 @@ public:
 
     void ClearCache() {
         m_Cache.clear();
-        Logger::Info("Shader cache cleared");
+        Logger::Info(LogGraphics, "Shader cache cleared");
     }
 
 private:
     std::string ReadShaderFile(const std::filesystem::path& path) {
         std::ifstream file(path, std::ios::binary | std::ios::ate);
         if (!file.is_open()) {
-            Logger::Error("Failed to open shader file: {}", path.string());
+            Logger::Error(LogGraphics, "Failed to open shader file: {}", path.string());
             return "";
         }
 

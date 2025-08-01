@@ -252,7 +252,7 @@ public:
 
         glfwGetCursorPos(glfwWindow, &m_LastMouseX, &m_LastMouseY);
 
-        Logger::Info("Window input handler initialized");
+        Logger::Info(LogInput, "Window input handler initialized");
     }
 
     ~WindowInputHandler() {
@@ -299,9 +299,9 @@ public:
         if (glfwRawMouseMotionSupported()) {
             glfwSetInputMode(glfwWindow, GLFW_RAW_MOUSE_MOTION, raw ? GLFW_TRUE : GLFW_FALSE);
             m_InputManager->SetRawMouseMode(raw);
-            Logger::Debug("Raw mouse mode {}", raw ? "enabled" : "disabled");
+            Logger::Debug(LogInput, "Raw mouse mode {}", raw ? "enabled" : "disabled");
         } else {
-            Logger::Warn("Raw mouse motion not supported");
+            Logger::Warn(LogInput, "Raw mouse motion not supported");
         }
     }
 

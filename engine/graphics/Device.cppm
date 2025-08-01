@@ -125,7 +125,7 @@ private:
 
         HRESULT hr = CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&m_Factory));
         if (FAILED(hr)) {
-            Logger::Error("Failed to create DXGI factory");
+            Logger::Error(LogGraphics, "Failed to create DXGI factory");
         }
     }
 
@@ -151,7 +151,7 @@ private:
         }
 
         if (!m_Adapter) {
-            Logger::Error("No suitable GPU adapter found");
+            Logger::Error(LogGraphics, "No suitable GPU adapter found");
         }
 
         DXGI_ADAPTER_DESC1 desc;
@@ -163,13 +163,13 @@ private:
         for (wchar_t wc : wName) {
             name.push_back(static_cast<char>(wc));
         }
-        Logger::Info("Selected GPU: {}", name);
+        Logger::Info(LogGraphics, "Selected GPU: {}", name);
     }
 
     void CreateDevice() {
         HRESULT hr = D3D12CreateDevice(m_Adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&m_Device));
         if (FAILED(hr)) {
-            Logger::Error("Failed to create D3D12 device");
+            Logger::Error(LogGraphics, "Failed to create D3D12 device");
         }
 
 #ifdef _DEBUG
@@ -206,19 +206,19 @@ private:
 
         HRESULT hr = m_Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_DirectQueue));
         if (FAILED(hr)) {
-            Logger::Error("Failed to create direct command queue");
+            Logger::Error(LogGraphics, "Failed to create direct command queue");
         }
 
         queueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
         hr = m_Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_ComputeQueue));
         if (FAILED(hr)) {
-            Logger::Error("Failed to create compute command queue");
+            Logger::Error(LogGraphics, "Failed to create compute command queue");
         }
 
         queueDesc.Type = D3D12_COMMAND_LIST_TYPE_COPY;
         hr = m_Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_CopyQueue));
         if (FAILED(hr)) {
-            Logger::Error("Failed to create copy command queue");
+            Logger::Error(LogGraphics, "Failed to create copy command queue");
         }
     }
 
@@ -239,7 +239,7 @@ private:
                                              D3D12_VARIABLE_SHADING_RATE_TIER_NOT_SUPPORTED;
         }
 
-        Logger::Info("GPU Features - RT: {}, Mesh Shaders: {}, VRS: {}",
+        Logger::Info(LogGraphics, "GPU Features - RT: {}, Mesh Shaders: {}, VRS: {}",
                      m_Features.rayTracing, m_Features.meshShaders, m_Features.variableRateShading);
     }
 

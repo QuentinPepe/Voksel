@@ -67,7 +67,7 @@ public:
 
         m_RenderGraph = std::make_unique<RenderGraph>(m_Device);
 
-        Logger::Info("Renderer initialized");
+        Logger::Info(LogGraphics, "Renderer initialized");
     }
 
     void BeginFrame() {
