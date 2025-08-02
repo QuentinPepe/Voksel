@@ -357,33 +357,43 @@ public:
     }
 
     void ExecutePhase(TaskPhase* phase) const {
-        // TODO : Logger::Trace("Executing phase: {}", phase->GetName());
-
         // Begin phase profiling
         if (m_ProfilingEnabled && TaskProfiler::Get().IsEnabled()) {
             TaskProfiler::Get().BeginPhase(phase->GetName(), phase->GetID());
         }
 
         // Submit initial tasks (no dependencies)
+        U32 submittedCount = 0;
         for (const auto& task : phase->GetTasks()) {
             if (task->m_Dependencies.empty()) {
                 m_Executor->SubmitTask(task.get());
+                submittedCount++;
             }
+        }
+
+        // If no tasks were submitted, we might have a dependency issue
+        if (submittedCount == 0 && !phase->GetTasks().empty()) {
+            Logger::Error(LogTasks, "No tasks in phase '{}' could be submitted - possible circular dependency",
+                         phase->GetName());
         }
 
         m_Executor->WaitForCompletion();
 
-        // End phase profiling
-        if (m_ProfilingEnabled && TaskProfiler::Get().IsEnabled()) {
-            TaskProfiler::Get().EndPhase(phase->GetID());
-        }
-
         bool allCompleted = true;
         for (const auto& task : phase->GetTasks()) {
-            if (task->GetStatus() != TaskStatus::Completed) {
+            TaskStatus status = task->GetStatus();
+            if (status != TaskStatus::Completed) {
                 allCompleted = false;
-                Logger::Error("Task '{}' in phase '{}' did not complete successfully",
-                             task->GetName(), phase->GetName());
+                if (status == TaskStatus::Failed) {
+                    Logger::Error(LogTasks, "Task '{}' in phase '{}' failed",
+                                 task->GetName(), phase->GetName());
+                } else if (status == TaskStatus::Pending) {
+                    Logger::Error(LogTasks, "Task '{}' in phase '{}' was never executed (status: Pending) - check dependencies",
+                                 task->GetName(), phase->GetName());
+                } else if (status == TaskStatus::Running) {
+                    Logger::Error(LogTasks, "Task '{}' in phase '{}' is still running - possible deadlock",
+                                 task->GetName(), phase->GetName());
+                }
             }
         }
 

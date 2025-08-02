@@ -200,6 +200,7 @@ public:
     }
 
     InputManager *GetInputManager() { return m_InputManager; }
+    World *GetWorld() { return m_World; }
 
 private:
     void SetupPhases() {
@@ -238,7 +239,6 @@ private:
         }, TaskPriority::Critical);
     }
 
-
     void SetupUserInputTasks(TaskPhase *phase) {
         phase->AddTask("HandleUserInput", [this]() {
             if (m_UserInputCallback) {
@@ -249,13 +249,8 @@ private:
 
     void SetupUpdateTasks(TaskPhase *preUpdate, TaskPhase *update, TaskPhase *postUpdate) {
         preUpdate->AddTask("PreUpdateSystems", [this]() {
+            // Pre-update logic
         });
-
-        update->AddTask("UpdateECS", [this]() {
-            if (m_World) {
-                m_World->Update(static_cast<F32>(m_CurrentFrame.deltaTime));
-            }
-        }, TaskPriority::High);
 
         update->AddTask("UpdateGame", [this]() {
             if (m_UpdateCallback) {
@@ -264,6 +259,7 @@ private:
         });
 
         postUpdate->AddTask("PostUpdateSystems", [this]() {
+            // Post-update logic
         });
     }
 
@@ -275,6 +271,7 @@ private:
         }, TaskPriority::Critical);
 
         preRender->AddTask("UpdateRenderData", [this]() {
+            // Update render data
         });
 
         render->AddTask("RenderScene", [this]() {
@@ -290,6 +287,7 @@ private:
         }, TaskPriority::Critical);
 
         postRender->AddTask("RenderStats", [this]() {
+            // Render statistics
         });
     }
 

@@ -4,12 +4,36 @@ import ECS.Component;
 import Core.Types;
 import std;
 
+// Component access modifiers
+export template<typename T>
+struct Read {
+    using type = T;
+    static constexpr bool is_read = true;
+    static constexpr bool is_write = false;
+};
+
+export template<typename T>
+struct Write {
+    using type = T;
+    static constexpr bool is_read = false;
+    static constexpr bool is_write = true;
+};
+
+export template<typename T>
+struct ReadWrite {
+    using type = T;
+    static constexpr bool is_read = true;
+    static constexpr bool is_write = true;
+};
+
 export template<typename T>
 struct With {
     using type = T;
     static constexpr bool is_with = true;
     static constexpr bool is_without = false;
     static constexpr bool is_optional = false;
+    static constexpr bool is_read = true;
+    static constexpr bool is_write = true;
 };
 
 export template<typename T>
@@ -18,6 +42,8 @@ struct Without {
     static constexpr bool is_with = false;
     static constexpr bool is_without = true;
     static constexpr bool is_optional = false;
+    static constexpr bool is_read = false;
+    static constexpr bool is_write = false;
 };
 
 export template<typename T>
@@ -26,14 +52,52 @@ struct Optional {
     static constexpr bool is_with = false;
     static constexpr bool is_without = false;
     static constexpr bool is_optional = true;
+    static constexpr bool is_read = true;
+    static constexpr bool is_write = false;
 };
 
 template<typename T>
 struct extract_type {
     using type = T;
-    static constexpr bool is_with = true;
+    static constexpr bool is_with = false;
     static constexpr bool is_without = false;
     static constexpr bool is_optional = false;
+    static constexpr bool is_read = true;
+    static constexpr bool is_write = true;
+    static constexpr bool is_component = true;
+};
+
+template<typename T>
+struct extract_type<Read<T>> {
+    using type = T;
+    static constexpr bool is_with = false;
+    static constexpr bool is_without = false;
+    static constexpr bool is_optional = false;
+    static constexpr bool is_read = true;
+    static constexpr bool is_write = false;
+    static constexpr bool is_component = true;
+};
+
+template<typename T>
+struct extract_type<Write<T>> {
+    using type = T;
+    static constexpr bool is_with = false;
+    static constexpr bool is_without = false;
+    static constexpr bool is_optional = false;
+    static constexpr bool is_read = false;
+    static constexpr bool is_write = true;
+    static constexpr bool is_component = true;
+};
+
+template<typename T>
+struct extract_type<ReadWrite<T>> {
+    using type = T;
+    static constexpr bool is_with = false;
+    static constexpr bool is_without = false;
+    static constexpr bool is_optional = false;
+    static constexpr bool is_read = true;
+    static constexpr bool is_write = true;
+    static constexpr bool is_component = true;
 };
 
 template<typename T>
@@ -42,6 +106,9 @@ struct extract_type<With<T>> {
     static constexpr bool is_with = true;
     static constexpr bool is_without = false;
     static constexpr bool is_optional = false;
+    static constexpr bool is_read = true;
+    static constexpr bool is_write = true;
+    static constexpr bool is_component = false;
 };
 
 template<typename T>
@@ -50,6 +117,9 @@ struct extract_type<Without<T>> {
     static constexpr bool is_with = false;
     static constexpr bool is_without = true;
     static constexpr bool is_optional = false;
+    static constexpr bool is_read = false;
+    static constexpr bool is_write = false;
+    static constexpr bool is_component = false;
 };
 
 template<typename T>
@@ -58,6 +128,9 @@ struct extract_type<Optional<T>> {
     static constexpr bool is_with = false;
     static constexpr bool is_without = false;
     static constexpr bool is_optional = true;
+    static constexpr bool is_read = true;
+    static constexpr bool is_write = false;
+    static constexpr bool is_component = true;
 };
 
 template<typename... Args>
@@ -67,18 +140,32 @@ struct QueryMasks {
             Archetype include{0};
             Archetype exclude{0};
             Archetype optional{0};
+            Archetype reads{0};
+            Archetype writes{0};
         } masks;
 
         auto processArg = []<typename Arg>(Masks& m) {
             using Extracted = extract_type<Arg>;
             const ComponentID id = ComponentRegistry::GetID<typename Extracted::type>();
 
-            if constexpr (Extracted::is_with) {
+            if constexpr (Extracted::is_component || Extracted::is_with) {
                 m.include |= (1ULL << id);
+                if constexpr (Extracted::is_read) {
+                    m.reads |= (1ULL << id);
+                }
+                if constexpr (Extracted::is_write) {
+                    m.writes |= (1ULL << id);
+                }
             } else if constexpr (Extracted::is_without) {
                 m.exclude |= (1ULL << id);
             } else if constexpr (Extracted::is_optional) {
                 m.optional |= (1ULL << id);
+                if constexpr (Extracted::is_read) {
+                    m.reads |= (1ULL << id);
+                }
+                if constexpr (Extracted::is_write) {
+                    m.writes |= (1ULL << id);
+                }
             }
         };
 
@@ -97,11 +184,8 @@ private:
     static constexpr auto s_Masks = QueryMasks<Args...>::masks;
 
     [[nodiscard]] constexpr bool MatchesArchetype(Archetype arch) const {
-
         if ((arch & s_Masks.include) != s_Masks.include) return false;
-
         if ((arch & s_Masks.exclude) != 0) return false;
-
         return true;
     }
 
@@ -220,13 +304,11 @@ public:
         return true;
     }
 
-    template<typename... Components>
-    void ForEach(auto func) {
-        ComponentGetter<Components...> getter{m_World};
-
+    template<typename Func>
+    void ForEach(Func func) {
         for (auto it = m_World->EntitiesBegin(); it != m_World->EntitiesEnd(); ++it) {
             if (MatchesArchetype(it->second)) {
-                std::apply(func, getter.Get(it->first));
+                ForEachImpl(it->first, func, std::make_index_sequence<sizeof...(Args)>{});
             }
         }
     }
@@ -234,4 +316,36 @@ public:
     static consteval Archetype GetIncludeMask() { return s_Masks.include; }
     static consteval Archetype GetExcludeMask() { return s_Masks.exclude; }
     static consteval Archetype GetOptionalMask() { return s_Masks.optional; }
+    static consteval Archetype GetReadMask() { return s_Masks.reads; }
+    static consteval Archetype GetWriteMask() { return s_Masks.writes; }
+
+private:
+    template<typename Func, size_t... Is>
+    void ForEachImpl(EntityHandle handle, Func func, std::index_sequence<Is...>) {
+        auto args = std::tuple_cat(GetComponentIfNeeded<Args>(handle)...);
+        std::apply(func, args);
+    }
+
+    template<typename Arg>
+    auto GetComponentIfNeeded(EntityHandle handle) {
+        using T = typename extract_type<Arg>::type;
+
+        if constexpr (!extract_type<Arg>::is_component) {
+            // With/Without don't contribute to the argument list
+            return std::tuple<>();
+        } else if constexpr (extract_type<Arg>::is_optional) {
+            // Optional components
+            auto* storage = m_World->template GetStorage<T>();
+            auto* component = storage ? storage->Get(handle) : nullptr;
+            return std::make_tuple(component);
+        } else if constexpr (extract_type<Arg>::is_read && !extract_type<Arg>::is_write) {
+            // Read-only components - return const pointer
+            auto* component = m_World->template GetStorage<T>()->Get(handle);
+            return std::make_tuple(static_cast<const T*>(component));
+        } else {
+            // Write or ReadWrite components - return non-const pointer
+            auto* component = m_World->template GetStorage<T>()->Get(handle);
+            return std::make_tuple(component);
+        }
+    }
 };

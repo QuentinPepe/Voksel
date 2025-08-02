@@ -1,32 +1,12 @@
 export module ECS.World;
 
 import ECS.Component;
-import ECS.Query;
 import Core.Types;
 import Core.Assert;
 import std;
 
-template<typename T> struct QueryTraits;
-
-template<typename World, typename... Args>
-struct QueryTraits<void(*)(Query<World, Args...>, F32)> {
-    using WorldType = World;
-    using QueryType = Query<World, Args...>;
-    static constexpr Archetype includeMask = QueryType::GetIncludeMask();
-    static constexpr Archetype excludeMask = QueryType::GetExcludeMask();
-};
-
-template<typename World, typename... Args>
-struct QueryTraits<void(Query<World, Args...>, F32)> {
-    using WorldType = World;
-    using QueryType = Query<World, Args...>;
-    static constexpr Archetype includeMask = QueryType::GetIncludeMask();
-    static constexpr Archetype excludeMask = QueryType::GetExcludeMask();
-};
-
 export class World {
 private:
-
     struct IComponentStorageBase {
         virtual ~IComponentStorageBase() = default;
         [[nodiscard]] virtual bool Contains(EntityHandle handle) const = 0;
@@ -69,44 +49,9 @@ private:
         ComponentStorage<T>* GetStorage() { return &storage; }
     };
 
-    struct ISystem {
-        virtual ~ISystem() = default;
-        virtual void Update(World* world, F32 dt) = 0;
-        [[nodiscard]] virtual Archetype GetIncludeMask() const = 0;
-        [[nodiscard]] virtual Archetype GetExcludeMask() const = 0;
-    };
-
-    template<typename Func>
-    class System : public ISystem {
-        Func m_Func;
-
-    public:
-        explicit System(Func func) : m_Func{func} {}
-
-        void Update(World* world, F32 dt) override {
-            using Traits = QueryTraits<Func>;
-            typename Traits::QueryType query{world};
-            m_Func(query, dt);
-        }
-
-        [[nodiscard]] Archetype GetIncludeMask() const override {
-            using Traits = QueryTraits<Func>;
-            return Traits::includeMask;
-        }
-
-        [[nodiscard]] Archetype GetExcludeMask() const override {
-            using Traits = QueryTraits<Func>;
-            return Traits::excludeMask;
-        }
-    };
-
     EntityManager m_EntityManager{};
     UnorderedMap<ComponentID, UniquePtr<IComponentStorageBase>> m_Storages{};
-    Vector<std::pair<std::string, UniquePtr<ISystem>>> m_Systems{};
-
     UnorderedMap<EntityHandle, Archetype> m_EntityArchetypes{};
-
-    bool m_ArchetypeCacheDirty{false};
 
     void UpdateEntityArchetype(EntityHandle handle) {
         Archetype arch = 0;
@@ -212,35 +157,12 @@ public:
         return it != m_EntityArchetypes.end() ? it->second : EMPTY_ARCHETYPE;
     }
 
-    template<typename Func>
-    void AddSystem(const std::string& name, Func func) {
-        m_Systems.emplace_back(name, std::make_unique<System<Func>>(func));
-    }
-
-    void Update(F32 dt) {
-
-        for (const auto &system: m_Systems | std::views::values) {
-            system->Update(this, dt);
-        }
-    }
-
-    void RemoveSystem(const std::string& name) {
-        std::erase_if(m_Systems, [&name](const auto& pair) {
-            return pair.first == name;
-        });
-    }
-
-    [[nodiscard]] USize GetSystemCount() const {
-        return m_Systems.size();
-    }
-
     [[nodiscard]] U16 GetMaxEntityId() const {
         return m_EntityManager.GetMaxEntityID();
     }
 
     void Clear() {
         m_Storages.clear();
-        m_Systems.clear();
         m_EntityArchetypes.clear();
         m_EntityManager.Clear();
     }

@@ -3,21 +3,129 @@ import Core.Log;
 import Tasks.TaskGraph;
 import Tasks.TaskProfiler;
 import Tasks.Orchestrator;
+import Tasks.ECSIntegration;
 import Graphics.Window;
 import Graphics;
 import Input.Core;
 import Input.Manager;
 import Input.Window;
+import ECS.World;
+import ECS.Component;
+import ECS.Query;
+import ECS.SystemScheduler;
 import std;
+
+struct Position {
+    F32 x, y, z;
+};
+
+struct Velocity {
+    F32 x, y, z;
+};
+
+struct Health {
+    F32 current;
+    F32 max;
+};
+
+struct Enemy {
+    F32 damage;
+};
+
+struct Player {};
+
+template<> struct ComponentTypeID<Position> {
+    static consteval ComponentID value() { return 1; }
+};
+
+template<> struct ComponentTypeID<Velocity> {
+    static consteval ComponentID value() { return 2; }
+};
+
+template<> struct ComponentTypeID<Health> {
+    static consteval ComponentID value() { return 3; }
+};
+
+template<> struct ComponentTypeID<Enemy> {
+    static consteval ComponentID value() { return 4; }
+};
+
+template<> struct ComponentTypeID<Player> {
+    static consteval ComponentID value() { return 5; }
+};
+
+class MovementSystem : public QuerySystem<MovementSystem, Write<Position>, Read<Velocity>> {
+public:
+    void Setup() {
+        QuerySystem::Setup();
+        SetName("Movement");
+        SetStage(SystemStage::Update);
+    }
+
+    void Run(World* world, F32 dt) override {
+        ForEach(world, [dt](Position* pos, const Velocity* vel) {
+            pos->x += vel->x * dt;
+            pos->y += vel->y * dt;
+            pos->z += vel->z * dt;
+        });
+    }
+};
+
+class HealthSystem : public QuerySystem<HealthSystem, Write<Health>> {
+public:
+    void Setup() {
+        QuerySystem::Setup();
+        SetName("Health");
+        SetStage(SystemStage::Update);
+        RunAfter("Damage");
+    }
+
+    void Run(World* world, F32 dt) override {
+        ForEach(world, [](Health* health) {
+            health->current = std::clamp(health->current, 0.0f, health->max);
+        });
+    }
+};
+
+class DamageSystem : public QuerySystem<DamageSystem, Write<Health>, Read<Enemy>, Without<Player>> {
+public:
+    void Setup() {
+        QuerySystem::Setup();
+        SetName("Damage");
+        SetStage(SystemStage::Update);
+    }
+
+    void Run(World* world, F32 dt) override {
+        ForEach(world, [dt](Health* health, const Enemy* enemy) {
+            health->current -= enemy->damage * dt;
+        });
+    }
+};
+
+class PlayerSystem : public QuerySystem<PlayerSystem, Read<Position>, Read<Health>, With<Player>> {
+public:
+    void Setup() {
+        QuerySystem::Setup();
+        SetName("Player");
+        SetStage(SystemStage::PostUpdate);
+        SetParallel(false);
+    }
+
+    void Run(World* world, F32 dt) override {
+        ForEach(world, [](const Position* pos, const Health* health) {
+
+        });
+    }
+};
 
 int main() {
     Logger::EnableColor(false);
-    Logger::Info("Starting the Voksel Engine v{}.{}.{}", 0, 1, 0);
+    Logger::Info("Starting the Voksel Engine with ECS v{}.{}.{}", 0, 1, 0);
 
     WindowConfig windowConfig{};
     windowConfig.width = 1280;
     windowConfig.height = 720;
-    windowConfig.title = "Voksel - Task Graph Example";
+    windowConfig.title = "Voksel - ECS Example";
     windowConfig.fullscreen = false;
     Window window{windowConfig};
 
@@ -35,10 +143,57 @@ int main() {
         }
     });
 
+    World world;
+
+    Logger::Info("Creating entities...");
+
+    auto player = world.CreateEntity();
+    world.AddComponent(player, Position{0.0f, 0.0f, 0.0f});
+    world.AddComponent(player, Velocity{0.0f, 0.0f, 0.0f});
+    world.AddComponent(player, Health{100.0f, 100.0f});
+    world.AddComponent(player, Player{});
+
+    for (int i = 0; i < 10; ++i) {
+        auto enemy = world.CreateEntity();
+        world.AddComponent(enemy, Position{
+            static_cast<F32>(i * 10.0f),
+            0.0f,
+            static_cast<F32>(i * 5.0f)
+        });
+        world.AddComponent(enemy, Velocity{
+            static_cast<F32>((i % 3) - 1),
+            0.0f,
+            static_cast<F32>((i % 2) * 2 - 1)
+        });
+        world.AddComponent(enemy, Health{50.0f, 50.0f});
+        world.AddComponent(enemy, Enemy{10.0f});
+    }
+
     EngineOrchestrator orchestrator(0);
     orchestrator.SetWindow(&window);
     orchestrator.SetInputManager(&inputManager);
     orchestrator.SetGraphicsContext(graphics.get());
+    orchestrator.SetWorld(&world);
+
+    EngineOrchestratorECS ecsIntegration(&orchestrator);
+    auto* systemScheduler = ecsIntegration.GetSystemScheduler();
+
+    auto* movementSystem = systemScheduler->AddSystem<MovementSystem>();
+    auto* healthSystem = systemScheduler->AddSystem<HealthSystem>();
+    auto* damageSystem = systemScheduler->AddSystem<DamageSystem>();
+    auto* playerSystem = systemScheduler->AddSystem<PlayerSystem>();
+
+    ecsIntegration.BuildECSExecutionGraph(&world);
+
+    {
+        auto dotGraph = systemScheduler->GenerateDotGraph();
+        std::ofstream file("ecs_systems.dot");
+        if (file.is_open()) {
+            file << dotGraph;
+            Logger::Info("ECS system graph saved to ecs_systems.dot");
+            Logger::Info("Generate PNG with: dot -Tpng ecs_systems.dot -o ecs_systems.png");
+        }
+    }
 
     Vertex triangleVertices[] = {
         {{0.0f, 0.5f, 0.0f},   {1.0f, 0.0f, 0.0f, 1.0f}},
@@ -49,12 +204,12 @@ int main() {
     U32 vertexBuffer = graphics->CreateVertexBuffer(triangleVertices, sizeof(triangleVertices));
 
     ShaderCode vertexShader{};
-    vertexShader.source = "basic/Basic.hlsl";
+    vertexShader.source = "basic\\Basic.hlsl";
     vertexShader.entryPoint = "VSMain";
     vertexShader.stage = ShaderStage::Vertex;
 
     ShaderCode pixelShader{};
-    pixelShader.source = "basic/Basic.hlsl";
+    pixelShader.source = "basic\\Basic.hlsl";
     pixelShader.entryPoint = "PSMain";
     pixelShader.stage = ShaderStage::Pixel;
 
@@ -74,31 +229,39 @@ int main() {
     bool shouldExit = false;
 
     orchestrator.SetUserInputCallback([&](EngineOrchestrator::FrameData&) {
-
         if (inputManager.IsKeyJustPressed(Key::Escape)) {
             Logger::Info("ESC pressed, exiting...");
             shouldExit = true;
         }
 
         if (inputManager.IsKeyJustPressed(Key::F1)) {
-            Logger::Debug("F1 key detected!");
             auto report = TaskProfiler::Get().GenerateReport();
             if (!report.empty()) {
                 TaskProfiler::Get().SaveToFile("profiler_data.txt");
                 Logger::Info("Profiler data saved");
-            } else {
-                Logger::Warn("No profiler data to save - profiling may be disabled");
             }
         }
 
         if (inputManager.IsKeyJustPressed(Key::F2)) {
-            Logger::Debug("F2 key detected!");
             bool profilingEnabled = !orchestrator.IsProfilingEnabled();
             orchestrator.SetProfilingEnabled(profilingEnabled);
             TaskProfiler::Get().SetEnabled(profilingEnabled);
             Logger::Info("Profiling {}", profilingEnabled ? "enabled" : "disabled");
         }
 
+        if (inputManager.IsKeyJustPressed(Key::Space)) {
+
+            auto entity = world.CreateEntity();
+            world.AddComponent(entity, Position{0.0f, 10.0f, 0.0f});
+            world.AddComponent(entity, Velocity{0.0f, -1.0f, 0.0f});
+            world.AddComponent(entity, Health{25.0f, 25.0f});
+            Logger::Info("Spawned new entity");
+        }
+    });
+
+    orchestrator.SetUpdateCallback([&](EngineOrchestrator::FrameData& frame) {
+
+        ecsIntegration.UpdateECS(static_cast<F32>(frame.deltaTime));
     });
 
     orchestrator.SetRenderCallback([&](EngineOrchestrator::FrameData& frame) {
@@ -125,14 +288,25 @@ int main() {
         if (frame.frameNumber - statsUpdateFrame >= 60) {
             statsUpdateFrame = frame.frameNumber;
 
-            Logger::Info("Frame {} - FPS: {:.1f}, Frame Time: {:.2f}ms",
+            Logger::Debug("Frame {} - FPS: {:.1f}, Frame Time: {:.2f}ms, Entities: {}",
                         frame.frameNumber,
                         orchestrator.GetFPS(),
-                        orchestrator.GetAverageFrameTime());
+                        orchestrator.GetAverageFrameTime(),
+                        world.GetEntityCount());
 
             auto stats = orchestrator.GetTaskGraphStats();
             Logger::Debug("Tasks: {} completed, {} failed, Execution time: {}μs",
                          stats.completedTasks, stats.failedTasks, stats.totalExecutionTime);
+
+            auto ecsStats = systemScheduler->GetStats();
+            if (!ecsStats.systemTimes.empty()) {
+                Logger::Debug("Top ECS Systems:");
+                for (size_t i = 0; i < std::min<size_t>(3, ecsStats.systemTimes.size()); ++i) {
+                    Logger::Debug("  {}: {}μs",
+                                 ecsStats.systemTimes[i].first,
+                                 ecsStats.systemTimes[i].second);
+                }
+            }
         }
     });
 
@@ -148,6 +322,7 @@ int main() {
 
     Logger::Info("Starting render loop...");
     Logger::Info("Press ESC to exit, F1 to save profiler data, F2 to toggle profiling");
+    Logger::Info("Press SPACE to spawn a new entity");
 
     while (!graphics->ShouldClose() && !shouldExit) {
         orchestrator.ExecuteFrame();
