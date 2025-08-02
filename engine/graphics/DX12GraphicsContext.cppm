@@ -29,7 +29,6 @@ using Microsoft::WRL::ComPtr;
 
 struct ResourceHandle {
     enum Type { VertexBuffer, IndexBuffer, Pipeline } type;
-
     U32 index;
 };
 
@@ -134,6 +133,7 @@ public:
     U32 CreateGraphicsPipeline(const GraphicsPipelineCreateInfo &info) override {
         std::vector<D3D12_ROOT_PARAMETER> rootParams;
 
+        // Root parameter 0: Camera constant buffer (b0)
         D3D12_ROOT_PARAMETER cameraParam = {};
         cameraParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         cameraParam.Descriptor.ShaderRegister = 0;
@@ -141,6 +141,7 @@ public:
         cameraParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         rootParams.push_back(cameraParam);
 
+        // Root parameter 1: Object constant buffer (b1)
         D3D12_ROOT_PARAMETER objectParam = {};
         objectParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         objectParam.Descriptor.ShaderRegister = 1;
