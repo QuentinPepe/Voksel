@@ -5,76 +5,10 @@ import Math.Core;
 import Math.Vector;
 import Math.Matrix;
 import Math.Quaternion;
+import Components.Transform;
 import std;
 
 export namespace Math {
-    struct Transform {
-        Vec3 position{Vec3::Zero};
-        Quat rotation{Quat::Identity};
-        Vec3 scale{Vec3::One};
-
-        constexpr Transform() = default;
-        constexpr Transform(const Vec3& pos) : position{pos} {}
-        constexpr Transform(const Vec3& pos, const Quat& rot) : position{pos}, rotation{rot} {}
-        constexpr Transform(const Vec3& pos, const Quat& rot, const Vec3& scl)
-            : position{pos}, rotation{rot}, scale{scl} {}
-
-        [[nodiscard]] Mat4 ToMatrix() const {
-            Mat4 t = Mat4::Translation(position);
-            Mat4 r = rotation.ToMatrix4();
-            Mat4 s = Mat4::Scale(scale);
-            return t * r * s;
-        }
-
-        [[nodiscard]] Transform operator*(const Transform& other) const {
-            return Transform{
-                position + rotation * (scale * other.position),
-                rotation * other.rotation,
-                scale * other.scale
-            };
-        }
-
-        [[nodiscard]] Vec3 TransformPoint(const Vec3& point) const {
-            return position + rotation * (scale * point);
-        }
-
-        [[nodiscard]] Vec3 TransformVector(const Vec3& vector) const {
-            return rotation * (scale * vector);
-        }
-
-        [[nodiscard]] Vec3 TransformDirection(const Vec3& direction) const {
-            return rotation * direction;
-        }
-
-        [[nodiscard]] Transform Inverse() const {
-            Quat invRot = rotation.Inverse();
-            Vec3 invScale{1.0f / scale.x, 1.0f / scale.y, 1.0f / scale.z};
-            Vec3 invPos = invRot * (-position * invScale);
-            return Transform{invPos, invRot, invScale};
-        }
-
-        [[nodiscard]] static Transform Lerp(const Transform& a, const Transform& b, F32 t) {
-            return Transform{
-                Vec3::Lerp(a.position, b.position, t),
-                Quat::Slerp(a.rotation, b.rotation, t),
-                Vec3::Lerp(a.scale, b.scale, t)
-            };
-        }
-
-        [[nodiscard]] Vec3 Forward() const { return rotation * Vec3::Forward; }
-        [[nodiscard]] Vec3 Right() const { return rotation * Vec3::Right; }
-        [[nodiscard]] Vec3 Up() const { return rotation * Vec3::Up; }
-
-        void LookAt(const Vec3& target, const Vec3& up = Vec3::Up) {
-            Vec3 forward = (target - position).Normalized();
-            rotation = Quat::LookRotation(forward, up);
-        }
-
-        static const Transform Identity;
-    };
-
-    inline constexpr Transform Transform::Identity{};
-
     // Common math functions
     struct Bounds {
         Vec3 min{std::numeric_limits<F32>::max()};

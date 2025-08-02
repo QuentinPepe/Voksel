@@ -13,6 +13,7 @@ import ECS.World;
 import ECS.Component;
 import ECS.Query;
 import ECS.SystemScheduler;
+import Components.ComponentRegistry;
 import std;
 
 struct Position {
@@ -35,23 +36,23 @@ struct Enemy {
 struct Player {};
 
 template<> struct ComponentTypeID<Position> {
-    static consteval ComponentID value() { return 1; }
+    static consteval ComponentID value() { return 1 + GAME_COMPONENT_START; }
 };
 
 template<> struct ComponentTypeID<Velocity> {
-    static consteval ComponentID value() { return 2; }
+    static consteval ComponentID value() { return 2 + GAME_COMPONENT_START; }
 };
 
 template<> struct ComponentTypeID<Health> {
-    static consteval ComponentID value() { return 3; }
+    static consteval ComponentID value() { return 3 + GAME_COMPONENT_START; }
 };
 
 template<> struct ComponentTypeID<Enemy> {
-    static consteval ComponentID value() { return 4; }
+    static consteval ComponentID value() { return 4 + GAME_COMPONENT_START; }
 };
 
 template<> struct ComponentTypeID<Player> {
-    static consteval ComponentID value() { return 5; }
+    static consteval ComponentID value() { return 5 + GAME_COMPONENT_START; }
 };
 
 class MovementSystem : public QuerySystem<MovementSystem, Write<Position>, Read<Velocity>> {
