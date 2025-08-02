@@ -29,20 +29,21 @@ using Microsoft::WRL::ComPtr;
 
 struct ResourceHandle {
     enum Type { VertexBuffer, IndexBuffer, Pipeline } type;
+
     U32 index;
 };
 
 class DX12GraphicsContext : public IGraphicsContext {
 private:
-    Window* m_Window;
+    Window *m_Window;
     std::unique_ptr<Renderer> m_Renderer;
     std::unique_ptr<ShaderManager> m_ShaderManager;
 
-    std::vector<std::unique_ptr<Buffer>> m_VertexBuffers;
-    std::vector<std::unique_ptr<Buffer>> m_IndexBuffers;
-    std::vector<std::unique_ptr<Buffer>> m_ConstantBuffers;
-    std::vector<std::unique_ptr<GraphicsPipeline>> m_Pipelines;
-    std::vector<std::unique_ptr<RootSignature>> m_RootSignatures;
+    std::vector<std::unique_ptr<Buffer> > m_VertexBuffers;
+    std::vector<std::unique_ptr<Buffer> > m_IndexBuffers;
+    std::vector<std::unique_ptr<Buffer> > m_ConstantBuffers;
+    std::vector<std::unique_ptr<GraphicsPipeline> > m_Pipelines;
+    std::vector<std::unique_ptr<RootSignature> > m_RootSignatures;
 
     U32 m_CurrentPipeline = INVALID_INDEX;
     U32 m_CurrentVertexBuffer = INVALID_INDEX;
@@ -50,13 +51,14 @@ private:
     bool m_InRenderPass = false;
 
     struct FramePassData {
-        std::vector<std::function<void(ID3D12GraphicsCommandList*)>> commands;
+        std::vector<std::function<void(ID3D12GraphicsCommandList *)> > commands;
         RenderPassInfo passInfo;
     };
+
     std::unique_ptr<FramePassData> m_CurrentPassData;
 
 public:
-    DX12GraphicsContext(Window& window, const GraphicsConfig& config) : m_Window{&window} {
+    DX12GraphicsContext(Window &window, const GraphicsConfig &config) : m_Window{&window} {
         RendererConfig rendererConfig;
         rendererConfig.deviceConfig.enableDebugLayer = config.enableValidation;
         rendererConfig.swapChainConfig.bufferCount = config.frameBufferCount;
@@ -67,7 +69,7 @@ public:
         m_ShaderManager = std::make_unique<ShaderManager>("shaders");
     }
 
-    U32 CreateVertexBuffer(const void* data, U64 size) override {
+    U32 CreateVertexBuffer(const void *data, U64 size) override {
         BufferDesc desc;
         desc.size = size;
         desc.usage = ResourceUsage::VertexBuffer;
@@ -81,7 +83,7 @@ public:
         return handle;
     }
 
-    U32 CreateIndexBuffer(const void* data, U64 size) override {
+    U32 CreateIndexBuffer(const void *data, U64 size) override {
         BufferDesc desc;
         desc.size = size;
         desc.usage = ResourceUsage::IndexBuffer;
@@ -110,7 +112,7 @@ public:
         return handle;
     }
 
-    void UpdateConstantBuffer(U32 buffer, const void* data, U64 size) override {
+    void UpdateConstantBuffer(U32 buffer, const void *data, U64 size) override {
         if (buffer >= m_ConstantBuffers.size()) return;
 
         m_ConstantBuffers[buffer]->UpdateData(data, size);
@@ -121,7 +123,7 @@ public:
 
         assert(m_InRenderPass, "Must be in render pass");
 
-        m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList* cmd) {
+        m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
             cmd->SetGraphicsRootConstantBufferView(
                 slot,
                 m_ConstantBuffers[buffer]->GetGPUAddress()
@@ -129,21 +131,21 @@ public:
         });
     }
 
-    U32 CreateGraphicsPipeline(const GraphicsPipelineCreateInfo& info) override {
+    U32 CreateGraphicsPipeline(const GraphicsPipelineCreateInfo &info) override {
         std::vector<D3D12_ROOT_PARAMETER> rootParams;
 
         D3D12_ROOT_PARAMETER cameraParam = {};
         cameraParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         cameraParam.Descriptor.ShaderRegister = 0;
         cameraParam.Descriptor.RegisterSpace = 0;
-        cameraParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+        cameraParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         rootParams.push_back(cameraParam);
 
         D3D12_ROOT_PARAMETER objectParam = {};
         objectParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         objectParam.Descriptor.ShaderRegister = 1;
         objectParam.Descriptor.RegisterSpace = 0;
-        objectParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+        objectParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         rootParams.push_back(objectParam);
 
         D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
@@ -158,14 +160,19 @@ public:
 
         GraphicsPipelineDesc pipelineDesc;
 
-        for (const auto& shader : info.shaders) {
+        for (const auto &shader: info.shaders) {
             std::string target;
             switch (shader.stage) {
-                case ShaderStage::Vertex: target = "vs_5_0"; break;
-                case ShaderStage::Pixel: target = "ps_5_0"; break;
-                case ShaderStage::Geometry: target = "gs_5_0"; break;
-                case ShaderStage::Hull: target = "hs_5_0"; break;
-                case ShaderStage::Domain: target = "ds_5_0"; break;
+                case ShaderStage::Vertex: target = "vs_5_0";
+                    break;
+                case ShaderStage::Pixel: target = "ps_5_0";
+                    break;
+                case ShaderStage::Geometry: target = "gs_5_0";
+                    break;
+                case ShaderStage::Hull: target = "hs_5_0";
+                    break;
+                case ShaderStage::Domain: target = "ds_5_0";
+                    break;
                 default: assert(false, "Invalid shader stage for graphics pipeline");
             }
 
@@ -183,19 +190,37 @@ public:
             }
 
             switch (shader.stage) {
-                case ShaderStage::Vertex: pipelineDesc.vertexShader = bytecode; break;
-                case ShaderStage::Pixel: pipelineDesc.pixelShader = bytecode; break;
-                case ShaderStage::Geometry: pipelineDesc.geometryShader = bytecode; break;
-                case ShaderStage::Hull: pipelineDesc.hullShader = bytecode; break;
-                case ShaderStage::Domain: pipelineDesc.domainShader = bytecode; break;
+                case ShaderStage::Vertex: pipelineDesc.vertexShader = bytecode;
+                    break;
+                case ShaderStage::Pixel: pipelineDesc.pixelShader = bytecode;
+                    break;
+                case ShaderStage::Geometry: pipelineDesc.geometryShader = bytecode;
+                    break;
+                case ShaderStage::Hull: pipelineDesc.hullShader = bytecode;
+                    break;
+                case ShaderStage::Domain: pipelineDesc.domainShader = bytecode;
+                    break;
                 default: break;
             }
         }
 
         std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayout;
-        for (const auto& [name, attrOffset] : info.vertexAttributes) {
-            DXGI_FORMAT format = DXGI_FORMAT_R32G32B32_FLOAT;
-            if (attrOffset == 12) format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        for (const auto &[name, attrOffset]: info.vertexAttributes) {
+            DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+
+            // Determine format based on semantic name
+            if (name == "POSITION") {
+                format = DXGI_FORMAT_R32G32B32_FLOAT; // Vec3
+            } else if (name == "NORMAL") {
+                format = DXGI_FORMAT_R32G32B32_FLOAT; // Vec3
+            } else if (name == "TEXCOORD") {
+                format = DXGI_FORMAT_R32G32_FLOAT; // Vec2
+            } else if (name == "COLOR") {
+                format = DXGI_FORMAT_R32_UINT; // U32 as single uint
+            } else {
+                // Default to Vec3 for unknown semantics
+                format = DXGI_FORMAT_R32G32B32_FLOAT;
+            }
 
             inputLayout.push_back({
                 name.c_str(), 0, format, 0, attrOffset,
@@ -239,7 +264,7 @@ public:
         m_CurrentPassData.reset();
     }
 
-    void BeginRenderPass(const RenderPassInfo& info) override {
+    void BeginRenderPass(const RenderPassInfo &info) override {
         assert(!m_InRenderPass, "Already in render pass");
         m_InRenderPass = true;
         m_CurrentPassData->passInfo = info;
@@ -254,8 +279,9 @@ public:
 
         m_Renderer->GetRenderGraph().AddPass<FramePassData>(
             passData->passInfo.name,
-            [](RenderGraphBuilder&, FramePassData&) {},
-            [this, passData](const RenderGraphResources&, CommandList& cmdList, const FramePassData&) {
+            [](RenderGraphBuilder &, FramePassData &) {
+            },
+            [this, passData](const RenderGraphResources &, CommandList &cmdList, const FramePassData &) {
                 ExecuteRenderPass(cmdList, *passData);
             }
         );
@@ -276,7 +302,7 @@ public:
     void Draw(U32 vertexCount, U32 instanceCount, U32 firstVertex, U32 firstInstance) override {
         assert(m_InRenderPass, "Must be in render pass");
 
-        m_CurrentPassData->commands.push_back([=](ID3D12GraphicsCommandList* cmd) {
+        m_CurrentPassData->commands.push_back([=](ID3D12GraphicsCommandList *cmd) {
             cmd->DrawInstanced(vertexCount, instanceCount, firstVertex, firstInstance);
         });
     }
@@ -284,7 +310,7 @@ public:
     void DrawIndexed(U32 indexCount, U32 instanceCount, U32 firstIndex, S32 vertexOffset, U32 firstInstance) override {
         assert(m_InRenderPass, "Must be in render pass");
 
-        m_CurrentPassData->commands.push_back([=](ID3D12GraphicsCommandList* cmd) {
+        m_CurrentPassData->commands.push_back([=](ID3D12GraphicsCommandList *cmd) {
             cmd->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
         });
     }
@@ -298,11 +324,11 @@ public:
         return m_Window->ShouldClose();
     }
 
-    ShaderManager* GetShaderManager() { return m_ShaderManager.get(); }
+    ShaderManager *GetShaderManager() { return m_ShaderManager.get(); }
 
 private:
-    void ExecuteRenderPass(CommandList& cmdList, const FramePassData& passData) const {
-        auto* cmd = cmdList.GetCommandList();
+    void ExecuteRenderPass(CommandList &cmdList, const FramePassData &passData) const {
+        auto *cmd = cmdList.GetCommandList();
 
         D3D12_VIEWPORT viewport = {
             0.0f, 0.0f,
@@ -319,7 +345,8 @@ private:
         cmd->RSSetViewports(1, &viewport);
         cmd->RSSetScissorRects(1, &scissor);
 
-        Resource rtResource(m_Renderer->GetCurrentRenderTarget(), D3D12_RESOURCE_STATE_PRESENT, ResourceType::Texture2D);
+        Resource rtResource(m_Renderer->GetCurrentRenderTarget(), D3D12_RESOURCE_STATE_PRESENT,
+                            ResourceType::Texture2D);
         rtResource.SetTracked(true);
         cmdList.TransitionResource(rtResource, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
@@ -331,7 +358,8 @@ private:
             cmd->ClearRenderTargetView(rtvHandle, passData.passInfo.clearColorValue, 0, nullptr);
         }
         if (passData.passInfo.clearDepth) {
-            cmd->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, passData.passInfo.clearDepthValue, 0, 0, nullptr);
+            cmd->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, passData.passInfo.clearDepthValue, 0, 0,
+                                       nullptr);
         }
 
         if (m_CurrentPipeline != INVALID_INDEX) {
@@ -355,7 +383,7 @@ private:
             cmd->IASetIndexBuffer(&ibView);
         }
 
-        for (const auto& command : passData.commands) {
+        for (const auto &command: passData.commands) {
             command(cmd);
         }
 
@@ -378,6 +406,6 @@ private:
     }
 };
 
-export std::unique_ptr<IGraphicsContext> CreateDX12GraphicsContext(Window& window, const GraphicsConfig& config) {
+export std::unique_ptr<IGraphicsContext> CreateDX12GraphicsContext(Window &window, const GraphicsConfig &config) {
     return std::make_unique<DX12GraphicsContext>(window, config);
 }

@@ -14,6 +14,7 @@ export namespace Voxel {
         ChunkPos position;
         bool needsRemesh{true};
 
+        ChunkComponent() = default;
         explicit ChunkComponent(const ChunkPos& pos) : chunk{std::make_unique<Chunk>(pos)}, position{pos} {}
     };
 
