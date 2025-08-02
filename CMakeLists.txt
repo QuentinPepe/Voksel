@@ -12,3 +12,5 @@ add_subdirectory(engine)
 if(VOXEL_BUILD_EXAMPLES)
     add_subdirectory(game)
 endif()
+
+add_subdirectory(tests)

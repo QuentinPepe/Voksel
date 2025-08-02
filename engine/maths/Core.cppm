@@ -51,8 +51,8 @@ export namespace Math {
         return x * x * x * (x * (x * 6.0f - 15.0f) + 10.0f);
     }
 
-    [[nodiscard]] bool NearlyEqual(F32 a, F32 b, F32 epsilon = EPSILON) {
-        return std::abs(a - b) <= epsilon;
+    [[nodiscard]] constexpr bool AlmostEqual(F32 a, F32 b, F32 epsilon = EPSILON) {
+        return (a < b ? b - a : a - b) <= epsilon;
     }
 
     [[nodiscard]] constexpr F32 Sign(F32 value) {

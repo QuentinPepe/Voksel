@@ -71,3 +71,13 @@ if(WIN32)
             $<$<BOOL:${PIX_LIBRARY}>:${PIX_LIBRARY}>
     )
 endif()
+
+# Catch2
+set(CATCH_BUILD_STATIC_LIBRARY ON CACHE INTERNAL "")
+set(CATCH_BUILD_TESTING        OFF CACHE INTERNAL "")
+FetchContent_Declare(
+        catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG        v2.13.10
+)
+FetchContent_MakeAvailable(catch2)
