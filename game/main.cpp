@@ -4,8 +4,10 @@ import Tasks.TaskGraph;
 import Tasks.TaskProfiler;
 import Tasks.Orchestrator;
 import Tasks.ECSIntegration;
-import Graphics.Window;
 import Graphics;
+import Graphics.Window;
+import Graphics.RenderData;
+import Graphics.DX12.GraphicsContext;
 import Input.Core;
 import Input.Manager;
 import Input.Window;
@@ -20,7 +22,10 @@ import Components.CameraController;
 import Systems.CameraManager;
 import Systems.CameraSystem;
 import Systems.CameraControllerSystem;
+import Systems.RenderSystem;
+import Math.Core;
 import Math.Vector;
+import Math.Matrix;
 
 import std;
 
@@ -200,13 +205,26 @@ int main() {
     auto *cameraSystem = systemScheduler->AddSystem<CameraSystem>();
     auto *cameraLifecycleSystem = systemScheduler->AddSystem<CameraLifecycleSystem>();
     auto *cameraControllerSystem = systemScheduler->AddSystem<CameraControllerSystem>();
-
     cameraControllerSystem->SetInputManager(&inputManager);
+
+    auto* renderDataSystem = systemScheduler->AddSystem<RenderDataSystem>();
+    renderDataSystem->SetGraphicsContext(graphics.get());
 
     auto cameraEntity = world.CreateEntity();
     world.AddComponent(cameraEntity, Transform{Math::Vec3{0.0f, 5.0f, 10.0f}});
     world.AddComponent(cameraEntity, Camera{});
     world.AddComponent(cameraEntity, CameraController{});
+
+    auto& cameraTransform = *world.GetComponent<Transform>(cameraEntity);
+    cameraTransform.position = Math::Vec3{0.0f, 2.0f, 5.0f};
+    cameraTransform.LookAt(Math::Vec3::Zero, Math::Vec3::Up);
+
+    auto& cameraComp = *world.GetComponent<Camera>(cameraEntity);
+    cameraComp.fov = Math::ToRadians(60.0f);
+    cameraComp.aspectRatio = static_cast<F32>(windowConfig.width) / windowConfig.height;
+    cameraComp.nearPlane = 0.1f;
+    cameraComp.farPlane = 100.0f;
+    cameraComp.UpdateProjection();
 
     ecsIntegration.BuildECSExecutionGraph(&world);
 
@@ -289,22 +307,32 @@ int main() {
         ecsIntegration.UpdateECS(static_cast<F32>(frame.deltaTime));
     });
 
-    orchestrator.SetRenderCallback([&](EngineOrchestrator::FrameData &frame) {
+    orchestrator.SetRenderCallback([&](EngineOrchestrator::FrameData& frame) {
         RenderPassInfo passInfo{};
         passInfo.name = "Main Pass";
         passInfo.clearColor = true;
         passInfo.clearDepth = true;
 
-        F32 time = static_cast<F32>(frame.totalTime);
-        passInfo.clearColorValue[0] = (std::sin(time) + 1.0f) * 0.25f;
-        passInfo.clearColorValue[1] = (std::sin(time * 1.3f) + 1.0f) * 0.25f;
-        passInfo.clearColorValue[2] = (std::sin(time * 0.7f) + 1.0f) * 0.25f;
-        passInfo.clearColorValue[3] = 1.0f;
-
         graphics->BeginRenderPass(passInfo);
+
+        U32 cameraBuffer = renderDataSystem->GetCameraConstantBuffer();
+        if (cameraBuffer != INVALID_INDEX) {
+            graphics->SetConstantBuffer(cameraBuffer, 0);
+        }
+
+        static U32 objectBuffer = INVALID_INDEX;
+        if (objectBuffer == INVALID_INDEX) {
+            objectBuffer = graphics->CreateConstantBuffer(sizeof(ObjectConstants));
+            ObjectConstants objectData{};
+            objectData.world = Math::Mat4::Identity;
+            graphics->UpdateConstantBuffer(objectBuffer, &objectData, sizeof(ObjectConstants));
+        }
+        graphics->SetConstantBuffer(objectBuffer, 1);
+
         graphics->SetPipeline(pipeline);
         graphics->SetVertexBuffer(vertexBuffer);
         graphics->Draw(3);
+
         graphics->EndRenderPass();
     });
 

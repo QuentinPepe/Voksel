@@ -40,6 +40,7 @@ private:
 
     std::vector<std::unique_ptr<Buffer>> m_VertexBuffers;
     std::vector<std::unique_ptr<Buffer>> m_IndexBuffers;
+    std::vector<std::unique_ptr<Buffer>> m_ConstantBuffers;
     std::vector<std::unique_ptr<GraphicsPipeline>> m_Pipelines;
     std::vector<std::unique_ptr<RootSignature>> m_RootSignatures;
 
@@ -94,14 +95,69 @@ public:
         return handle;
     }
 
+    U32 CreateConstantBuffer(U64 size) override {
+        U64 alignedSize = (size + 255) & ~255;
+
+        BufferDesc desc;
+        desc.size = alignedSize;
+        desc.usage = ResourceUsage::ConstantBuffer;
+        desc.cpuAccessible = true;
+
+        auto buffer = std::make_unique<Buffer>(m_Renderer->GetDevice(), desc);
+
+        U32 handle = static_cast<U32>(m_ConstantBuffers.size());
+        m_ConstantBuffers.push_back(std::move(buffer));
+        return handle;
+    }
+
+    void UpdateConstantBuffer(U32 buffer, const void* data, U64 size) override {
+        if (buffer >= m_ConstantBuffers.size()) return;
+
+        m_ConstantBuffers[buffer]->UpdateData(data, size);
+    }
+
+    void SetConstantBuffer(U32 buffer, U32 slot) override {
+        if (buffer >= m_ConstantBuffers.size()) return;
+
+        assert(m_InRenderPass, "Must be in render pass");
+
+        m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList* cmd) {
+            cmd->SetGraphicsRootConstantBufferView(
+                slot,
+                m_ConstantBuffers[buffer]->GetGPUAddress()
+            );
+        });
+    }
+
     U32 CreateGraphicsPipeline(const GraphicsPipelineCreateInfo& info) override {
+        std::vector<D3D12_ROOT_PARAMETER> rootParams;
+
+        D3D12_ROOT_PARAMETER cameraParam = {};
+        cameraParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        cameraParam.Descriptor.ShaderRegister = 0;
+        cameraParam.Descriptor.RegisterSpace = 0;
+        cameraParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+        rootParams.push_back(cameraParam);
+
+        D3D12_ROOT_PARAMETER objectParam = {};
+        objectParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        objectParam.Descriptor.ShaderRegister = 1;
+        objectParam.Descriptor.RegisterSpace = 0;
+        objectParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+        rootParams.push_back(objectParam);
+
         D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
-        rootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+        rootSigDesc.NumParameters = static_cast<UINT>(rootParams.size());
+        rootSigDesc.pParameters = rootParams.data();
+        rootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+                            D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+                            D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+                            D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
+
         auto rootSig = std::make_unique<RootSignature>(m_Renderer->GetDevice(), rootSigDesc);
 
         GraphicsPipelineDesc pipelineDesc;
 
-        // Use ShaderManager for compilation if shader source is provided
         for (const auto& shader : info.shaders) {
             std::string target;
             switch (shader.stage) {
@@ -115,12 +171,9 @@ public:
 
             ShaderBytecode bytecode;
 
-            // Check if this is a file path or direct source
             if (shader.source.find('\n') == std::string::npos && shader.source.ends_with(".hlsl")) {
-                // It's a file path
                 bytecode = m_ShaderManager->LoadShader(shader.source, shader.entryPoint, target);
             } else {
-                // It's inline source code
                 bytecode = m_ShaderManager->CompileShaderFromSource(
                     shader.source,
                     "inline_shader",

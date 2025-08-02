@@ -57,6 +57,8 @@ public:
     virtual U32 CreateVertexBuffer(const void* data, U64 size) = 0;
     virtual U32 CreateIndexBuffer(const void* data, U64 size) = 0;
     virtual U32 CreateGraphicsPipeline(const GraphicsPipelineCreateInfo& info) = 0;
+    virtual U32 CreateConstantBuffer(U64 size) = 0;
+    virtual void UpdateConstantBuffer(U32 buffer, const void* data, U64 size) = 0;
 
     // Rendering
     virtual void BeginFrame() = 0;
@@ -68,6 +70,7 @@ public:
     virtual void SetPipeline(U32 pipeline) = 0;
     virtual void SetVertexBuffer(U32 buffer) = 0;
     virtual void SetIndexBuffer(U32 buffer) = 0;
+    virtual void SetConstantBuffer(U32 buffer, U32 slot) = 0;
 
     virtual void Draw(U32 vertexCount, U32 instanceCount = 1, U32 firstVertex = 0, U32 firstInstance = 0) = 0;
     virtual void DrawIndexed(U32 indexCount, U32 instanceCount = 1, U32 firstIndex = 0, S32 vertexOffset = 0, U32 firstInstance = 0) = 0;
