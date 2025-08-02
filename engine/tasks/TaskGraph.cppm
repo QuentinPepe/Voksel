@@ -79,7 +79,7 @@ public:
         assert(dependency != this, "Task cannot depend on itself");
         m_Dependencies.push_back(dependency);
         dependency->m_Dependents.push_back(this);
-        m_PendingDependencies.fetch_add(1);
+
     }
 
     void Reset() {
@@ -212,7 +212,6 @@ public:
         {
             std::lock_guard lock(m_QueueMutex);
             m_ReadyQueue.push(task);
-            // TODO : Logger::Trace(LogTasks, "Submitted task: {} (Queue size: {})", task->GetName(), m_ReadyQueue.size());
         }
         m_QueueCV.notify_one();
     }
@@ -268,7 +267,6 @@ private:
                 worker->tasksExecuted++;
                 worker->totalExecutionTime += task->GetExecutionTime();
 
-                // Record task execution in profiler
                 if (m_ProfilingEnabled && TaskProfiler::Get().IsEnabled()) {
                     TaskProfiler::Get().RecordTask(
                         task->GetName(),
@@ -279,17 +277,24 @@ private:
                     );
                 }
 
-                U32 currentActive = m_ActiveTasks.fetch_sub(1) - 1;
+                {
+                    std::lock_guard lock(m_QueueMutex);
 
-                for (Task* dependent : task->m_Dependents) {
-                    U32 remaining = dependent->m_PendingDependencies.fetch_sub(1) - 1;
-                    if (remaining == 0 && dependent->GetStatus() == TaskStatus::Pending) {
-                        SubmitTask(dependent);
+                    for (Task* dependent : task->m_Dependents) {
+
+                        if (dependent->GetStatus() == TaskStatus::Pending) {
+                            U32 remaining = dependent->m_PendingDependencies.fetch_sub(1);
+                            if (remaining == 1) {
+
+                                m_ReadyQueue.push(dependent);
+                                m_QueueCV.notify_one();
+                            }
+                        }
                     }
                 }
 
+                U32 currentActive = m_ActiveTasks.fetch_sub(1) - 1;
                 if (currentActive == 0) {
-                    std::lock_guard lock(m_QueueMutex);
                     m_QueueCV.notify_all();
                 }
             }
@@ -357,12 +362,11 @@ public:
     }
 
     void ExecutePhase(TaskPhase* phase) const {
-        // Begin phase profiling
+
         if (m_ProfilingEnabled && TaskProfiler::Get().IsEnabled()) {
             TaskProfiler::Get().BeginPhase(phase->GetName(), phase->GetID());
         }
 
-        // Submit initial tasks (no dependencies)
         U32 submittedCount = 0;
         for (const auto& task : phase->GetTasks()) {
             if (task->m_Dependencies.empty()) {
@@ -371,7 +375,6 @@ public:
             }
         }
 
-        // If no tasks were submitted, we might have a dependency issue
         if (submittedCount == 0 && !phase->GetTasks().empty()) {
             Logger::Error(LogTasks, "No tasks in phase '{}' could be submitted - possible circular dependency",
                          phase->GetName());
@@ -390,6 +393,16 @@ public:
                 } else if (status == TaskStatus::Pending) {
                     Logger::Error(LogTasks, "Task '{}' in phase '{}' was never executed (status: Pending) - check dependencies",
                                  task->GetName(), phase->GetName());
+
+                    Logger::Debug(LogTasks, "  Task has {} dependencies, {} pending",
+                                 task->m_Dependencies.size(),
+                                 task->m_PendingDependencies.load());
+
+                    for (const Task* dep : task->m_Dependencies) {
+                        Logger::Debug(LogTasks, "  Dependency '{}' status: {}",
+                                    dep->GetName(),
+                                    static_cast<int>(dep->GetStatus()));
+                    }
                 } else if (status == TaskStatus::Running) {
                     Logger::Error(LogTasks, "Task '{}' in phase '{}' is still running - possible deadlock",
                                  task->GetName(), phase->GetName());
@@ -398,6 +411,10 @@ public:
         }
 
         phase->m_Completed.store(allCompleted);
+
+        if (m_ProfilingEnabled && TaskProfiler::Get().IsEnabled()) {
+            TaskProfiler::Get().EndPhase(phase->GetID());
+        }
     }
 
     [[nodiscard]] std::string GenerateDotGraph() const {
@@ -424,7 +441,6 @@ public:
             ss << "  }\n\n";
         }
 
-        // Dependencies
         ss << "  // Dependencies\n";
         for (const auto& phase : m_Phases) {
             for (const auto& task : phase->GetTasks()) {
@@ -434,7 +450,6 @@ public:
             }
         }
 
-        // Phase ordering
         ss << "\n  // Phase ordering\n";
         ss << "  edge [style=dashed, color=red];\n";
         for (size_t i = 1; i < m_Phases.size(); ++i) {

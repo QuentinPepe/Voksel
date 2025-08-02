@@ -9,13 +9,16 @@ import Core.Assert;
 import Core.Log;
 import std;
 
-// Adapter to integrate ECS with TaskGraph
 export class ECSTaskAdapter {
 private:
     SystemScheduler* m_Scheduler;
     EngineOrchestrator* m_Orchestrator;
     World* m_World;
     F32 m_DeltaTime{0.016f};
+
+    // Add synchronization
+    mutable std::mutex m_ExecutionMutex;
+    std::atomic<bool> m_IsExecuting{false};
 
     // Map SystemPriority to TaskPriority
     static TaskPriority ConvertPriority(SystemPriority sysPriority) {
@@ -49,6 +52,8 @@ public:
     }
 
     void BuildExecutionGraph(World* world) {
+        std::lock_guard lock(m_ExecutionMutex);
+
         m_World = world;
         m_Scheduler->BuildExecutionGraph(world);
 
@@ -71,29 +76,62 @@ private:
         // Map to store task pointers for dependency resolution
         UnorderedMap<const SystemNode*, Task*> nodeToTask;
 
-        // Create tasks for each system
+        // Create tasks for each system with proper synchronization
         for (const auto& [stage, nodes] : m_Scheduler->GetStageNodes()) {
             std::string phaseName = GetStagePhaseName(stage);
 
             for (auto* node : nodes) {
+                // Capture node by value to ensure it's valid during execution
+                auto* capturedNode = node;
+                auto* capturedScheduler = m_Scheduler;
+                auto* capturedWorld = m_World;
+                auto* deltaTimePtr = &m_DeltaTime;
+                auto* isExecutingPtr = &m_IsExecuting;
+
                 Task* task = m_Orchestrator->AddTaskToPhase(
                     phaseName,
                     node->metadata.name,
-                    [this, node]() {
-                        m_Scheduler->ExecuteSystem(node, m_DeltaTime);
+                    [capturedNode, capturedScheduler, capturedWorld, deltaTimePtr, isExecutingPtr]() {
+                        // Ensure only one system executes at a time if not parallel
+                        if (!capturedNode->metadata.isParallel) {
+                            bool expected = false;
+                            while (!isExecutingPtr->compare_exchange_weak(expected, true)) {
+                                expected = false;
+                                std::this_thread::yield();
+                            }
+                        }
+
+                        try {
+                            capturedScheduler->ExecuteSystem(capturedNode, *deltaTimePtr);
+                        } catch (...) {
+                            if (!capturedNode->metadata.isParallel) {
+                                isExecutingPtr->store(false);
+                            }
+                            throw;
+                        }
+
+                        if (!capturedNode->metadata.isParallel) {
+                            isExecutingPtr->store(false);
+                        }
                     },
                     ConvertPriority(node->metadata.priority)
                 );
 
                 nodeToTask[node] = task;
+
+                Logger::Debug(LogECS, "Created task for system '{}' in phase '{}'",
+                            node->metadata.name, phaseName);
             }
         }
 
-        // Add dependencies between tasks
+        // Add dependencies between tasks with validation
         for (const auto& [stage, nodes] : m_Scheduler->GetStageNodes()) {
             for (auto* node : nodes) {
                 Task* nodeTask = nodeToTask[node];
-                if (!nodeTask) continue;
+                if (!nodeTask) {
+                    Logger::Error(LogECS, "Task not found for system '{}'", node->metadata.name);
+                    continue;
+                }
 
                 for (auto* dep : node->dependencies) {
                     // Only add dependencies within the same stage
@@ -101,6 +139,11 @@ private:
                         Task* depTask = nodeToTask[dep];
                         if (depTask) {
                             nodeTask->AddDependency(depTask);
+                            Logger::Debug(LogECS, "Added dependency: '{}' depends on '{}'",
+                                        node->metadata.name, dep->metadata.name);
+                        } else {
+                            Logger::Warn(LogECS, "Dependency task not found for system '{}'",
+                                       dep->metadata.name);
                         }
                     }
                 }
