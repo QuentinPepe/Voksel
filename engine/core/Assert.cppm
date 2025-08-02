@@ -35,13 +35,11 @@ export constexpr void assert(bool condition, const char* expr,
                             const Callsite& loc = Callsite::current()) {
 #ifndef NDEBUG
     if (std::is_constant_evaluated()) {
-
         if (!condition) {
             struct assertion_failed_at_compile_time {};
             auto trigger_error = assertion_failed_at_compile_time{};
         }
     } else {
-
         if (!condition) [[unlikely]] {
             assert_fail(expr, loc);
         }
