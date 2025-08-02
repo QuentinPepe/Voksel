@@ -3,12 +3,14 @@ add_subdirectory(ecs)
 add_subdirectory(graphics)
 add_subdirectory(input)
 add_subdirectory(tasks)
+add_subdirectory(maths)
 
 add_library(voxel_engine INTERFACE)
 
 target_link_libraries(voxel_engine
         INTERFACE
             voxel_core
+            voxel_maths
             voxel_ecs
             voxel_graphics
             voxel_input
