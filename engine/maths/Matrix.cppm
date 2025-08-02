@@ -211,9 +211,9 @@ export namespace Math {
 
         [[nodiscard]] static Mat4 Translation(F32 x, F32 y, F32 z) {
             Mat4 result{1.0f};
-            result.m[3][0] = x;
-            result.m[3][1] = y;
-            result.m[3][2] = z;
+            result.m[0][3] = x;
+            result.m[1][3] = y;
+            result.m[2][3] = z;
             return result;
         }
 
@@ -317,7 +317,7 @@ export namespace Math {
         }
 
         [[nodiscard]] Vec3 GetTranslation() const {
-            return Vec3{m[3][0], m[3][1], m[3][2]};
+            return Vec3{m[0][3], m[1][3], m[2][3]};
         }
 
         [[nodiscard]] Vec3 GetScale() const {

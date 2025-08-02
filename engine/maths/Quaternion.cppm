@@ -229,10 +229,10 @@ export namespace Math {
         [[nodiscard]] Mat4 ToMatrix4() const {
             Mat3 rot = ToMatrix3();
             return Mat4{
-                Vec4{rot.col0, 0.0f},
-                Vec4{rot.col1, 0.0f},
-                Vec4{rot.col2, 0.0f},
-                Vec4{0.0f, 0.0f, 0.0f, 1.0f}
+                Vec4{ rot.m[0][0], rot.m[1][0], rot.m[2][0], 0.0f },
+                Vec4{ rot.m[0][1], rot.m[1][1], rot.m[2][1], 0.0f },
+                Vec4{ rot.m[0][2], rot.m[1][2], rot.m[2][2], 0.0f },
+                Vec4{   0.0f,       0.0f,       0.0f,       1.0f }
             };
         }
 

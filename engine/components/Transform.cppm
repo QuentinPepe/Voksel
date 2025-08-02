@@ -14,13 +14,11 @@ export struct Transform {
     Math::Quat rotation{Math::Quat::Identity};
     Math::Vec3 scale{Math::Vec3::One};
 
-    // Local space data
-    Math::Mat4 localMatrix{Math::Mat4::Identity};
-    bool localDirty{true};
+    mutable Math::Mat4 localMatrix{Math::Mat4::Identity};
+    mutable bool localDirty{true};
 
-    // World space data
-    Math::Mat4 worldMatrix{Math::Mat4::Identity};
-    bool worldDirty{true};
+    mutable Math::Mat4 worldMatrix{Math::Mat4::Identity};
+    mutable bool worldDirty{true};
 
     constexpr Transform() = default;
 
@@ -88,8 +86,9 @@ private:
         Math::Mat4 t = Math::Mat4::Translation(position);
         Math::Mat4 r = rotation.ToMatrix4();
         Math::Mat4 s = Math::Mat4::Scale(scale);
-        const_cast<Transform *>(this)->localMatrix = t * r * s;
-        const_cast<Transform *>(this)->localDirty = false;
+
+        localMatrix = t * r * s;
+        localDirty = false;
     }
 };
 
