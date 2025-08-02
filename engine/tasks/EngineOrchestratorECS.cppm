@@ -166,6 +166,13 @@ public:
         m_ECSAdapter = std::make_unique<ECSTaskAdapter>(m_SystemScheduler.get(), orchestrator);
     }
 
+    ~EngineOrchestratorECS() {
+        // Clean up adapter first to ensure no tasks are referencing the scheduler
+        m_ECSAdapter.reset();
+        // Then clean up the scheduler
+        m_SystemScheduler.reset();
+    }
+
     SystemScheduler* GetSystemScheduler() {
         return m_SystemScheduler.get();
     }

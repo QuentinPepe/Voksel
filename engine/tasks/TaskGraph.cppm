@@ -79,7 +79,6 @@ public:
         assert(dependency != this, "Task cannot depend on itself");
         m_Dependencies.push_back(dependency);
         dependency->m_Dependents.push_back(this);
-
     }
 
     void Reset() {
@@ -183,6 +182,9 @@ private:
     std::atomic<bool> m_Running{false};
     bool m_ProfilingEnabled{true};
 
+    std::chrono::steady_clock::time_point m_LastProgressTime;
+    std::atomic<U32> m_LastActiveCount{0};
+
 public:
     explicit TaskExecutor(U32 threadCount = 0) {
         if (threadCount == 0) {
@@ -199,6 +201,7 @@ public:
         }
 
         m_Running.store(true);
+        m_LastProgressTime = std::chrono::steady_clock::now();
         Logger::Info(LogTasks, "TaskExecutor initialized with {} worker threads", threadCount);
     }
 
@@ -217,10 +220,45 @@ public:
     }
 
     void WaitForCompletion() {
+        constexpr auto timeout = std::chrono::seconds(30);
+        constexpr auto checkInterval = std::chrono::milliseconds(100);
+        auto start = std::chrono::steady_clock::now();
+
         std::unique_lock lock(m_QueueMutex);
-        m_QueueCV.wait(lock, [this] {
-            return m_ReadyQueue.empty() && m_ActiveTasks.load() == 0;
-        });
+
+        while (!m_ReadyQueue.empty() || m_ActiveTasks.load() > 0) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = now - start;
+
+            if (elapsed > timeout) {
+                Logger::Error(LogTasks, "WaitForCompletion timeout! Queue size: {}, Active tasks: {}",
+                             m_ReadyQueue.size(), m_ActiveTasks.load());
+
+                break;
+            }
+
+            bool signaled = m_QueueCV.wait_for(lock, checkInterval, [this] {
+                return m_ReadyQueue.empty() && m_ActiveTasks.load() == 0;
+            });
+
+            U32 currentActive = m_ActiveTasks.load();
+            if (currentActive != m_LastActiveCount.load()) {
+                m_LastActiveCount.store(currentActive);
+                m_LastProgressTime = now;
+            } else if (currentActive > 0) {
+
+                auto timeSinceProgress = now - m_LastProgressTime;
+                if (timeSinceProgress > std::chrono::seconds(5)) {
+                    Logger::Warn(LogTasks, "No progress for {}s. Active tasks: {}, Queue size: {}",
+                                std::chrono::duration_cast<std::chrono::seconds>(timeSinceProgress).count(),
+                                currentActive, m_ReadyQueue.size());
+                }
+            }
+
+            if (m_ReadyQueue.empty() && m_ActiveTasks.load() == 0) {
+                break;
+            }
+        }
     }
 
     void Shutdown() {
@@ -249,6 +287,11 @@ private:
 
             {
                 std::unique_lock lock(m_QueueMutex);
+
+                if (m_ReadyQueue.empty() && m_ActiveTasks.load() == 0) {
+                    m_QueueCV.notify_all();
+                }
+
                 m_QueueCV.wait(lock, [this, worker] {
                     return !m_ReadyQueue.empty() || !m_Running.load() || worker->shouldStop.load();
                 });
@@ -281,11 +324,9 @@ private:
                     std::lock_guard lock(m_QueueMutex);
 
                     for (Task* dependent : task->m_Dependents) {
-
                         if (dependent->GetStatus() == TaskStatus::Pending) {
                             U32 remaining = dependent->m_PendingDependencies.fetch_sub(1);
                             if (remaining == 1) {
-
                                 m_ReadyQueue.push(dependent);
                                 m_QueueCV.notify_one();
                             }
@@ -294,8 +335,12 @@ private:
                 }
 
                 U32 currentActive = m_ActiveTasks.fetch_sub(1) - 1;
-                if (currentActive == 0) {
-                    m_QueueCV.notify_all();
+
+                {
+                    std::lock_guard lock(m_QueueMutex);
+                    if (currentActive == 0 && m_ReadyQueue.empty()) {
+                        m_QueueCV.notify_all();
+                    }
                 }
             }
         }
@@ -362,7 +407,6 @@ public:
     }
 
     void ExecutePhase(TaskPhase* phase) const {
-
         if (m_ProfilingEnabled && TaskProfiler::Get().IsEnabled()) {
             TaskProfiler::Get().BeginPhase(phase->GetName(), phase->GetID());
         }
@@ -378,20 +422,35 @@ public:
         if (submittedCount == 0 && !phase->GetTasks().empty()) {
             Logger::Error(LogTasks, "No tasks in phase '{}' could be submitted - possible circular dependency",
                          phase->GetName());
+
+            for (const auto& task : phase->GetTasks()) {
+                Logger::Error(LogTasks, "  Task '{}' has {} dependencies:",
+                             task->GetName(), task->m_Dependencies.size());
+                for (const Task* dep : task->m_Dependencies) {
+                    Logger::Error(LogTasks, "    -> '{}'", dep->GetName());
+                }
+            }
         }
 
         m_Executor->WaitForCompletion();
 
         bool allCompleted = true;
+        U32 pendingCount = 0;
+        U32 runningCount = 0;
+        U32 failedCount = 0;
+
         for (const auto& task : phase->GetTasks()) {
             TaskStatus status = task->GetStatus();
             if (status != TaskStatus::Completed) {
                 allCompleted = false;
+
                 if (status == TaskStatus::Failed) {
+                    failedCount++;
                     Logger::Error(LogTasks, "Task '{}' in phase '{}' failed",
                                  task->GetName(), phase->GetName());
                 } else if (status == TaskStatus::Pending) {
-                    Logger::Error(LogTasks, "Task '{}' in phase '{}' was never executed (status: Pending) - check dependencies",
+                    pendingCount++;
+                    Logger::Error(LogTasks, "Task '{}' in phase '{}' was never executed (status: Pending)",
                                  task->GetName(), phase->GetName());
 
                     Logger::Debug(LogTasks, "  Task has {} dependencies, {} pending",
@@ -404,10 +463,16 @@ public:
                                     static_cast<int>(dep->GetStatus()));
                     }
                 } else if (status == TaskStatus::Running) {
+                    runningCount++;
                     Logger::Error(LogTasks, "Task '{}' in phase '{}' is still running - possible deadlock",
                                  task->GetName(), phase->GetName());
                 }
             }
+        }
+
+        if (!allCompleted) {
+            Logger::Error(LogTasks, "Phase '{}' incomplete: {} pending, {} running, {} failed",
+                         phase->GetName(), pendingCount, runningCount, failedCount);
         }
 
         phase->m_Completed.store(allCompleted);

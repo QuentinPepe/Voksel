@@ -9,6 +9,7 @@ export enum ComponentIDs : ComponentID {
 
     // Rendering components
     Camera_ID,
+    CameraController_ID,
 
     // Game specific components
     GAME_COMPONENT_START

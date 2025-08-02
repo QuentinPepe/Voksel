@@ -14,6 +14,14 @@ import ECS.Component;
 import ECS.Query;
 import ECS.SystemScheduler;
 import Components.ComponentRegistry;
+import Components.Transform;
+import Components.Camera;
+import Components.CameraController;
+import Systems.CameraManager;
+import Systems.CameraSystem;
+import Systems.CameraControllerSystem;
+import Math.Vector;
+
 import std;
 
 struct Position {
@@ -33,29 +41,35 @@ struct Enemy {
     F32 damage;
 };
 
-struct Player {};
+struct Player {
+};
 
-template<> struct ComponentTypeID<Position> {
+template<>
+struct ComponentTypeID<Position> {
     static consteval ComponentID value() { return 1 + GAME_COMPONENT_START; }
 };
 
-template<> struct ComponentTypeID<Velocity> {
+template<>
+struct ComponentTypeID<Velocity> {
     static consteval ComponentID value() { return 2 + GAME_COMPONENT_START; }
 };
 
-template<> struct ComponentTypeID<Health> {
+template<>
+struct ComponentTypeID<Health> {
     static consteval ComponentID value() { return 3 + GAME_COMPONENT_START; }
 };
 
-template<> struct ComponentTypeID<Enemy> {
+template<>
+struct ComponentTypeID<Enemy> {
     static consteval ComponentID value() { return 4 + GAME_COMPONENT_START; }
 };
 
-template<> struct ComponentTypeID<Player> {
+template<>
+struct ComponentTypeID<Player> {
     static consteval ComponentID value() { return 5 + GAME_COMPONENT_START; }
 };
 
-class MovementSystem : public QuerySystem<MovementSystem, Write<Position>, Read<Velocity>> {
+class MovementSystem : public QuerySystem<MovementSystem, Write<Position>, Read<Velocity> > {
 public:
     void Setup() {
         QuerySystem::Setup();
@@ -63,8 +77,8 @@ public:
         SetStage(SystemStage::Update);
     }
 
-    void Run(World* world, F32 dt) override {
-        ForEach(world, [dt](Position* pos, const Velocity* vel) {
+    void Run(World *world, F32 dt) override {
+        ForEach(world, [dt](Position *pos, const Velocity *vel) {
             pos->x += vel->x * dt;
             pos->y += vel->y * dt;
             pos->z += vel->z * dt;
@@ -72,7 +86,7 @@ public:
     }
 };
 
-class HealthSystem : public QuerySystem<HealthSystem, Write<Health>> {
+class HealthSystem : public QuerySystem<HealthSystem, Write<Health> > {
 public:
     void Setup() {
         QuerySystem::Setup();
@@ -81,14 +95,14 @@ public:
         RunAfter("Damage");
     }
 
-    void Run(World* world, F32 dt) override {
-        ForEach(world, [](Health* health) {
+    void Run(World *world, F32 dt) override {
+        ForEach(world, [](Health *health) {
             health->current = std::clamp(health->current, 0.0f, health->max);
         });
     }
 };
 
-class DamageSystem : public QuerySystem<DamageSystem, Write<Health>, Read<Enemy>, Without<Player>> {
+class DamageSystem : public QuerySystem<DamageSystem, Write<Health>, Read<Enemy>, Without<Player> > {
 public:
     void Setup() {
         QuerySystem::Setup();
@@ -96,14 +110,14 @@ public:
         SetStage(SystemStage::Update);
     }
 
-    void Run(World* world, F32 dt) override {
-        ForEach(world, [dt](Health* health, const Enemy* enemy) {
+    void Run(World *world, F32 dt) override {
+        ForEach(world, [dt](Health *health, const Enemy *enemy) {
             health->current -= enemy->damage * dt;
         });
     }
 };
 
-class PlayerSystem : public QuerySystem<PlayerSystem, Read<Position>, Read<Health>, With<Player>> {
+class PlayerSystem : public QuerySystem<PlayerSystem, Read<Position>, Read<Health>, With<Player> > {
 public:
     void Setup() {
         QuerySystem::Setup();
@@ -112,9 +126,8 @@ public:
         SetParallel(false);
     }
 
-    void Run(World* world, F32 dt) override {
-        ForEach(world, [](const Position* pos, const Health* health) {
-
+    void Run(World *world, F32 dt) override {
+        ForEach(world, [](const Position *pos, const Health *health) {
         });
     }
 };
@@ -157,15 +170,15 @@ int main() {
     for (int i = 0; i < 10; ++i) {
         auto enemy = world.CreateEntity();
         world.AddComponent(enemy, Position{
-            static_cast<F32>(i * 10.0f),
-            0.0f,
-            static_cast<F32>(i * 5.0f)
-        });
+                               static_cast<F32>(i * 10.0f),
+                               0.0f,
+                               static_cast<F32>(i * 5.0f)
+                           });
         world.AddComponent(enemy, Velocity{
-            static_cast<F32>((i % 3) - 1),
-            0.0f,
-            static_cast<F32>((i % 2) * 2 - 1)
-        });
+                               static_cast<F32>((i % 3) - 1),
+                               0.0f,
+                               static_cast<F32>((i % 2) * 2 - 1)
+                           });
         world.AddComponent(enemy, Health{50.0f, 50.0f});
         world.AddComponent(enemy, Enemy{10.0f});
     }
@@ -177,16 +190,28 @@ int main() {
     orchestrator.SetWorld(&world);
 
     EngineOrchestratorECS ecsIntegration(&orchestrator);
-    auto* systemScheduler = ecsIntegration.GetSystemScheduler();
+    auto *systemScheduler = ecsIntegration.GetSystemScheduler();
 
-    auto* movementSystem = systemScheduler->AddSystem<MovementSystem>();
-    auto* healthSystem = systemScheduler->AddSystem<HealthSystem>();
-    auto* damageSystem = systemScheduler->AddSystem<DamageSystem>();
-    auto* playerSystem = systemScheduler->AddSystem<PlayerSystem>();
+    auto *movementSystem = systemScheduler->AddSystem<MovementSystem>();
+    auto *healthSystem = systemScheduler->AddSystem<HealthSystem>();
+    auto *damageSystem = systemScheduler->AddSystem<DamageSystem>();
+    auto *playerSystem = systemScheduler->AddSystem<PlayerSystem>();
+
+    auto *cameraSystem = systemScheduler->AddSystem<CameraSystem>();
+    auto *cameraLifecycleSystem = systemScheduler->AddSystem<CameraLifecycleSystem>();
+    auto *cameraControllerSystem = systemScheduler->AddSystem<CameraControllerSystem>();
+
+    cameraControllerSystem->SetInputManager(&inputManager);
+
+    auto cameraEntity = world.CreateEntity();
+    world.AddComponent(cameraEntity, Transform{Math::Vec3{0.0f, 5.0f, 10.0f}});
+    world.AddComponent(cameraEntity, Camera{});
+    world.AddComponent(cameraEntity, CameraController{});
 
     ecsIntegration.BuildECSExecutionGraph(&world);
 
-    {
+    windowInput.SetCursorLocked(false);
+    windowInput.SetCursorVisible(true); {
         auto dotGraph = systemScheduler->GenerateDotGraph();
         std::ofstream file("ecs_systems.dot");
         if (file.is_open()) {
@@ -197,8 +222,8 @@ int main() {
     }
 
     Vertex triangleVertices[] = {
-        {{0.0f, 0.5f, 0.0f},   {1.0f, 0.0f, 0.0f, 1.0f}},
-        {{0.5f, -0.5f, 0.0f},  {0.0f, 1.0f, 0.0f, 1.0f}},
+        {{0.0f, 0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+        {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
         {{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}}
     };
 
@@ -229,7 +254,7 @@ int main() {
 
     bool shouldExit = false;
 
-    orchestrator.SetUserInputCallback([&](EngineOrchestrator::FrameData&) {
+    orchestrator.SetUserInputCallback([&](EngineOrchestrator::FrameData &) {
         if (inputManager.IsKeyJustPressed(Key::Escape)) {
             Logger::Info("ESC pressed, exiting...");
             shouldExit = true;
@@ -250,22 +275,21 @@ int main() {
             Logger::Info("Profiling {}", profilingEnabled ? "enabled" : "disabled");
         }
 
-        if (inputManager.IsKeyJustPressed(Key::Space)) {
-
-            auto entity = world.CreateEntity();
-            world.AddComponent(entity, Position{0.0f, 10.0f, 0.0f});
-            world.AddComponent(entity, Velocity{0.0f, -1.0f, 0.0f});
-            world.AddComponent(entity, Health{25.0f, 25.0f});
-            Logger::Info("Spawned new entity");
+        if (inputManager.IsMouseButtonJustPressed(MouseButton::Right)) {
+            windowInput.SetCursorLocked(true);
+            windowInput.SetCursorVisible(false);
+        }
+        if (inputManager.IsMouseButtonJustReleased(MouseButton::Right)) {
+            windowInput.SetCursorLocked(false);
+            windowInput.SetCursorVisible(true);
         }
     });
 
-    orchestrator.SetUpdateCallback([&](EngineOrchestrator::FrameData& frame) {
-
+    orchestrator.SetUpdateCallback([&](EngineOrchestrator::FrameData &frame) {
         ecsIntegration.UpdateECS(static_cast<F32>(frame.deltaTime));
     });
 
-    orchestrator.SetRenderCallback([&](EngineOrchestrator::FrameData& frame) {
+    orchestrator.SetRenderCallback([&](EngineOrchestrator::FrameData &frame) {
         RenderPassInfo passInfo{};
         passInfo.name = "Main Pass";
         passInfo.clearColor = true;
@@ -285,33 +309,31 @@ int main() {
     });
 
     U64 statsUpdateFrame = 0;
-    orchestrator.SetPostFrameCallback([&](EngineOrchestrator::FrameData& frame) {
+    orchestrator.SetPostFrameCallback([&](EngineOrchestrator::FrameData &frame) {
         if (frame.frameNumber - statsUpdateFrame >= 60) {
             statsUpdateFrame = frame.frameNumber;
 
             Logger::Debug("Frame {} - FPS: {:.1f}, Frame Time: {:.2f}ms, Entities: {}",
-                        frame.frameNumber,
-                        orchestrator.GetFPS(),
-                        orchestrator.GetAverageFrameTime(),
-                        world.GetEntityCount());
+                          frame.frameNumber,
+                          orchestrator.GetFPS(),
+                          orchestrator.GetAverageFrameTime(),
+                          world.GetEntityCount());
 
             auto stats = orchestrator.GetTaskGraphStats();
             Logger::Debug("Tasks: {} completed, {} failed, Execution time: {}μs",
-                         stats.completedTasks, stats.failedTasks, stats.totalExecutionTime);
+                          stats.completedTasks, stats.failedTasks, stats.totalExecutionTime);
 
             auto ecsStats = systemScheduler->GetStats();
             if (!ecsStats.systemTimes.empty()) {
                 Logger::Debug("Top ECS Systems:");
                 for (size_t i = 0; i < std::min<size_t>(3, ecsStats.systemTimes.size()); ++i) {
                     Logger::Debug("  {}: {}μs",
-                                 ecsStats.systemTimes[i].first,
-                                 ecsStats.systemTimes[i].second);
+                                  ecsStats.systemTimes[i].first,
+                                  ecsStats.systemTimes[i].second);
                 }
             }
         }
-    });
-
-    {
+    }); {
         auto dotGraph = orchestrator.GenerateTaskGraphVisualization();
         std::ofstream file("task_graph.dot");
         if (file.is_open()) {
@@ -329,9 +351,7 @@ int main() {
         orchestrator.ExecuteFrame();
     }
 
-    Logger::Info("\n{}", TaskProfiler::Get().GenerateReport());
-
-    {
+    Logger::Info("\n{}", TaskProfiler::Get().GenerateReport()); {
         auto dotGraph = orchestrator.GenerateTaskGraphVisualization();
         std::ofstream file("task_graph_final.dot");
         if (file.is_open()) {
