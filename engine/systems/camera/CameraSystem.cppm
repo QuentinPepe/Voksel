@@ -26,7 +26,7 @@ public:
                 transform->position,
                 transform->position + transform->Forward(),
                 transform->Up()
-            ).Inverse();
+            );
 
             if (camera->needsUpdate) {
                 camera->UpdateViewProjection();

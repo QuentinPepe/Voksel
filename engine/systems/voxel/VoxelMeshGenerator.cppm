@@ -12,10 +12,11 @@ import std;
 
 export namespace Voxel {
     struct VoxelVertex {
-        Math::Vec3 position;
-        Math::Vec3 normal;
-        Math::Vec2 uv;
+        F32 position[3];
+        F32 normal[3];
+        F32 uv[2];
         U32 color;
+        F32 padding[3];
     };
 
     class MeshGenerator {
@@ -67,14 +68,31 @@ export namespace Voxel {
 
             for (int i = 0; i < 4; ++i) {
                 VoxelVertex vertex;
-                vertex.position = position + Math::Vec3{
-                                      FACE_VERTICES[static_cast<U8>(face)][i][0],
-                                      FACE_VERTICES[static_cast<U8>(face)][i][1],
-                                      FACE_VERTICES[static_cast<U8>(face)][i][2],
-                                  };
-                vertex.normal = normal;
-                vertex.uv = Math::Vec2{FACE_UVS[i][0], FACE_UVS[i][1]};
+
+                Math::Vec3 pos = position + Math::Vec3{
+                                     FACE_VERTICES[static_cast<U8>(face)][i][0],
+                                     FACE_VERTICES[static_cast<U8>(face)][i][1],
+                                     FACE_VERTICES[static_cast<U8>(face)][i][2],
+                                 };
+
+                // Fill arrays
+                vertex.position[0] = pos.x;
+                vertex.position[1] = pos.y;
+                vertex.position[2] = pos.z;
+
+                vertex.normal[0] = normal.x;
+                vertex.normal[1] = normal.y;
+                vertex.normal[2] = normal.z;
+
+                vertex.uv[0] = FACE_UVS[i][0];
+                vertex.uv[1] = FACE_UVS[i][1];
+
                 vertex.color = color;
+
+                // Initialize padding
+                vertex.padding[0] = 0.0f;
+                vertex.padding[1] = 0.0f;
+                vertex.padding[2] = 0.0f;
 
                 m_Vertices.push_back(vertex);
             }
@@ -124,7 +142,7 @@ export namespace Voxel {
                                 nz >= 0 && nz < CHUNK_SIZE) {
                                 neighbor = chunk.GetVoxel(nx, ny, nz);
                             } else {
-                                const Chunk* neighborChunk = neighbors[faceIdx];
+                                const Chunk *neighborChunk = neighbors[faceIdx];
                                 if (neighborChunk) {
                                     U32 localX = (nx + CHUNK_SIZE) % CHUNK_SIZE;
                                     U32 localY = (ny + CHUNK_SIZE) % CHUNK_SIZE;
@@ -142,7 +160,7 @@ export namespace Voxel {
             }
         }
 
-        void GenerateSimpleCube(const Math::Vec3& position, BlockType blockType) {
+        void GenerateSimpleCube(const Math::Vec3 &position, BlockType blockType) {
             m_Vertices.clear();
             m_Indices.clear();
 
@@ -151,8 +169,8 @@ export namespace Voxel {
             }
         }
 
-        [[nodiscard]] const Vector<VoxelVertex>& GetVertices() const { return m_Vertices; }
-        [[nodiscard]] const Vector<U32>& GetIndices() const { return m_Indices; }
+        [[nodiscard]] const Vector<VoxelVertex> &GetVertices() const { return m_Vertices; }
+        [[nodiscard]] const Vector<U32> &GetIndices() const { return m_Indices; }
         [[nodiscard]] bool IsEmpty() const { return m_Vertices.empty(); }
     };
 }
