@@ -1,5 +1,7 @@
 add_executable(math_tests
         core_tests.cpp
+        vector_tests.cpp
+        matrix_tests.cpp
 )
 
 target_link_libraries(math_tests

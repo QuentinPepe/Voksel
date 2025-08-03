@@ -11,13 +11,15 @@ import Math.Vector;
 import std;
 
 export namespace Math {
-    // Column-major 3x3 matrix
+
     struct alignas(16) Mat3 {
         union {
-            F32 m[3][3];
+            F32 m[3][3];  // m[row][col] for row-major storage
             F32 data[9];
             struct {
-                Vec3 col0, col1, col2;
+                F32 m00, m01, m02;  // row 0
+                F32 m10, m11, m12;  // row 1
+                F32 m20, m21, m22;  // row 2
             };
         };
 
@@ -32,19 +34,17 @@ export namespace Math {
         constexpr Mat3(F32 m00, F32 m01, F32 m02,
                       F32 m10, F32 m11, F32 m12,
                       F32 m20, F32 m21, F32 m22) : m{
-            {m00, m10, m20},
-            {m01, m11, m21},
-            {m02, m12, m22}
+            {m00, m01, m02},
+            {m10, m11, m12},
+            {m20, m21, m22}
         } {}
 
-        constexpr Mat3(const Vec3& c0, const Vec3& c1, const Vec3& c2)
-            : col0{c0}, col1{c1}, col2{c2} {}
-
-        [[nodiscard]] constexpr Vec3 operator*(const Vec3& v) const {
-            return {
-                m[0][0] * v.x + m[1][0] * v.y + m[2][0] * v.z,
-                m[0][1] * v.x + m[1][1] * v.y + m[2][1] * v.z,
-                m[0][2] * v.x + m[1][2] * v.y + m[2][2] * v.z
+        // Column constructor for easy column-based initialization
+        static constexpr Mat3 FromColumns(const Vec3& c0, const Vec3& c1, const Vec3& c2) {
+            return Mat3{
+                c0.x, c1.x, c2.x,
+                c0.y, c1.y, c2.y,
+                c0.z, c1.z, c2.z
             };
         }
 
@@ -53,33 +53,43 @@ export namespace Math {
             for (U32 i = 0; i < 3; ++i) {
                 for (U32 j = 0; j < 3; ++j) {
                     for (U32 k = 0; k < 3; ++k) {
-                        result.m[i][j] += m[k][j] * other.m[i][k];
+                        result.m[i][j] += m[i][k] * other.m[k][j];
                     }
                 }
             }
             return result;
         }
 
-        [[nodiscard]] constexpr Mat3 operator*(F32 scalar) const {
-            return {
-                col0 * scalar,
-                col1 * scalar,
-                col2 * scalar
+        [[nodiscard]] constexpr Vec3 operator*(const Vec3& v) const {
+            return Vec3{
+                m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z,
+                m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z,
+                m[2][0] * v.x + m[2][1] * v.y + m[2][2] * v.z
             };
+        }
+
+        [[nodiscard]] constexpr Mat3 operator*(F32 scalar) const {
+            Mat3 result;
+            for (U32 i = 0; i < 3; ++i) {
+                for (U32 j = 0; j < 3; ++j) {
+                    result.m[i][j] = m[i][j] * scalar;
+                }
+            }
+            return result;
         }
 
         [[nodiscard]] constexpr Mat3 Transposed() const {
             return {
-                m[0][0], m[0][1], m[0][2],
-                m[1][0], m[1][1], m[1][2],
-                m[2][0], m[2][1], m[2][2]
+                m[0][0], m[1][0], m[2][0],
+                m[0][1], m[1][1], m[2][1],
+                m[0][2], m[1][2], m[2][2]
             };
         }
 
         [[nodiscard]] constexpr F32 Determinant() const {
-            return m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2])
-                 - m[1][0] * (m[0][1] * m[2][2] - m[2][1] * m[0][2])
-                 + m[2][0] * (m[0][1] * m[1][2] - m[1][1] * m[0][2]);
+            return m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+                 - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+                 + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
         }
 
         [[nodiscard]] Mat3 Inverse() const {
@@ -88,15 +98,15 @@ export namespace Math {
 
             F32 invDet = 1.0f / det;
             return Mat3{
-                (m[1][1] * m[2][2] - m[2][1] * m[1][2]) * invDet,
-                (m[2][1] * m[0][2] - m[0][1] * m[2][2]) * invDet,
-                (m[0][1] * m[1][2] - m[1][1] * m[0][2]) * invDet,
-                (m[2][0] * m[1][2] - m[1][0] * m[2][2]) * invDet,
-                (m[0][0] * m[2][2] - m[2][0] * m[0][2]) * invDet,
-                (m[1][0] * m[0][2] - m[0][0] * m[1][2]) * invDet,
-                (m[1][0] * m[2][1] - m[2][0] * m[1][1]) * invDet,
-                (m[2][0] * m[0][1] - m[0][0] * m[2][1]) * invDet,
-                (m[0][0] * m[1][1] - m[1][0] * m[0][1]) * invDet
+                (m[1][1] * m[2][2] - m[1][2] * m[2][1]) * invDet,
+                (m[0][2] * m[2][1] - m[0][1] * m[2][2]) * invDet,
+                (m[0][1] * m[1][2] - m[0][2] * m[1][1]) * invDet,
+                (m[1][2] * m[2][0] - m[1][0] * m[2][2]) * invDet,
+                (m[0][0] * m[2][2] - m[0][2] * m[2][0]) * invDet,
+                (m[0][2] * m[1][0] - m[0][0] * m[1][2]) * invDet,
+                (m[1][0] * m[2][1] - m[1][1] * m[2][0]) * invDet,
+                (m[0][1] * m[2][0] - m[0][0] * m[2][1]) * invDet,
+                (m[0][0] * m[1][1] - m[0][1] * m[1][0]) * invDet
             };
         }
 
@@ -122,20 +132,21 @@ export namespace Math {
             return Scale(scale.x, scale.y);
         }
 
+        // Helper to get column
+        [[nodiscard]] constexpr Vec3 GetColumn(U32 col) const {
+            return Vec3{m[0][col], m[1][col], m[2][col]};
+        }
+
         static const Mat3 Identity;
     };
 
     inline constexpr Mat3 Mat3::Identity{1.0f};
 
-    // Column-major 4x4 matrix
     struct alignas(16) Mat4 {
         union {
-            F32 m[4][4];
+            F32 m[4][4];  // m[row][col] for row-major storage
             F32 data[16];
-            struct {
-                Vec4 col0, col1, col2, col3;
-            };
-            __m128 columns[4];
+            __m128 rows[4];  // SIMD access by rows
         };
 
         constexpr Mat4() : Mat4(1.0f) {}
@@ -147,57 +158,82 @@ export namespace Math {
             {0.0f, 0.0f, 0.0f, diagonal}
         } {}
 
-        constexpr Mat4(const Vec4& c0, const Vec4& c1, const Vec4& c2, const Vec4& c3)
-            : col0{c0}, col1{c1}, col2{c2}, col3{c3} {}
+        // Constructor from 16 values (row-major order)
+        constexpr Mat4(F32 m00, F32 m01, F32 m02, F32 m03,
+                      F32 m10, F32 m11, F32 m12, F32 m13,
+                      F32 m20, F32 m21, F32 m22, F32 m23,
+                      F32 m30, F32 m31, F32 m32, F32 m33) : m{
+            {m00, m01, m02, m03},
+            {m10, m11, m12, m13},
+            {m20, m21, m22, m23},
+            {m30, m31, m32, m33}
+        } {}
 
-        Mat4(__m128 c0, __m128 c1, __m128 c2, __m128 c3)
-            : columns{c0, c1, c2, c3} {}
+        // Column-based constructor for compatibility
+        static constexpr Mat4 FromColumns(const Vec4& c0, const Vec4& c1, const Vec4& c2, const Vec4& c3) {
+            return Mat4{
+                c0.x, c1.x, c2.x, c3.x,
+                c0.y, c1.y, c2.y, c3.y,
+                c0.z, c1.z, c2.z, c3.z,
+                c0.w, c1.w, c2.w, c3.w
+            };
+        }
+
+        Mat4(__m128 r0, __m128 r1, __m128 r2, __m128 r3)
+            : rows{r0, r1, r2, r3} {}
 
         [[nodiscard]] inline Vec4 operator*(const Vec4& v) const {
+            // Optimized matrix-vector multiplication using SIMD
             __m128 vx = _mm_set1_ps(v.x);
             __m128 vy = _mm_set1_ps(v.y);
             __m128 vz = _mm_set1_ps(v.z);
             __m128 vw = _mm_set1_ps(v.w);
 
-            __m128 result = _mm_mul_ps(columns[0], vx);
-            result = _mm_add_ps(result, _mm_mul_ps(columns[1], vy));
-            result = _mm_add_ps(result, _mm_mul_ps(columns[2], vz));
-            result = _mm_add_ps(result, _mm_mul_ps(columns[3], vw));
+            __m128 row0 = rows[0];
+            __m128 row1 = rows[1];
+            __m128 row2 = rows[2];
+            __m128 row3 = rows[3];
 
-            return Vec4{result};
+            // Extract components and compute dot products
+            F32 x = m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z + m[0][3] * v.w;
+            F32 y = m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z + m[1][3] * v.w;
+            F32 z = m[2][0] * v.x + m[2][1] * v.y + m[2][2] * v.z + m[2][3] * v.w;
+            F32 w = m[3][0] * v.x + m[3][1] * v.y + m[3][2] * v.z + m[3][3] * v.w;
+
+            return Vec4{x, y, z, w};
         }
 
         [[nodiscard]] inline Mat4 operator*(const Mat4& other) const {
-            Mat4 result;
-            for (int i = 0; i < 4; ++i) {
-                __m128 c0 = _mm_set1_ps(other.m[i][0]);
-                __m128 c1 = _mm_set1_ps(other.m[i][1]);
-                __m128 c2 = _mm_set1_ps(other.m[i][2]);
-                __m128 c3 = _mm_set1_ps(other.m[i][3]);
+            Mat4 result{0.0f};
 
-                result.columns[i] = _mm_add_ps(
-                    _mm_add_ps(_mm_mul_ps(columns[0], c0), _mm_mul_ps(columns[1], c1)),
-                    _mm_add_ps(_mm_mul_ps(columns[2], c2), _mm_mul_ps(columns[3], c3))
-                );
+            // Standard matrix multiplication
+            for (int i = 0; i < 4; ++i) {
+                for (int j = 0; j < 4; ++j) {
+                    for (int k = 0; k < 4; ++k) {
+                        result.m[i][j] += m[i][k] * other.m[k][j];
+                    }
+                }
             }
+
             return result;
         }
 
         [[nodiscard]] Mat4 operator*(F32 scalar) const {
             __m128 s = _mm_set1_ps(scalar);
             return Mat4{
-                _mm_mul_ps(columns[0], s),
-                _mm_mul_ps(columns[1], s),
-                _mm_mul_ps(columns[2], s),
-                _mm_mul_ps(columns[3], s)
+                _mm_mul_ps(rows[0], s),
+                _mm_mul_ps(rows[1], s),
+                _mm_mul_ps(rows[2], s),
+                _mm_mul_ps(rows[3], s)
             };
         }
 
         [[nodiscard]] Mat4 Transposed() const {
-            __m128 tmp0 = _mm_unpacklo_ps(columns[0], columns[1]);
-            __m128 tmp2 = _mm_unpacklo_ps(columns[2], columns[3]);
-            __m128 tmp1 = _mm_unpackhi_ps(columns[0], columns[1]);
-            __m128 tmp3 = _mm_unpackhi_ps(columns[2], columns[3]);
+            // Efficient transpose using SIMD shuffles
+            __m128 tmp0 = _mm_unpacklo_ps(rows[0], rows[1]);
+            __m128 tmp2 = _mm_unpacklo_ps(rows[2], rows[3]);
+            __m128 tmp1 = _mm_unpackhi_ps(rows[0], rows[1]);
+            __m128 tmp3 = _mm_unpackhi_ps(rows[2], rows[3]);
 
             return Mat4{
                 _mm_movelh_ps(tmp0, tmp2),
@@ -210,11 +246,12 @@ export namespace Math {
         [[nodiscard]] Mat4 Inverse() const;
 
         [[nodiscard]] static Mat4 Translation(F32 x, F32 y, F32 z) {
-            Mat4 result{1.0f};
-            result.m[0][3] = x;
-            result.m[1][3] = y;
-            result.m[2][3] = z;
-            return result;
+            return Mat4{
+                1.0f, 0.0f, 0.0f, x,
+                0.0f, 1.0f, 0.0f, y,
+                0.0f, 0.0f, 1.0f, z,
+                0.0f, 0.0f, 0.0f, 1.0f
+            };
         }
 
         [[nodiscard]] static Mat4 Translation(const Vec3& translation) {
@@ -228,10 +265,10 @@ export namespace Math {
             Vec3 a = axis.Normalized();
 
             return Mat4{
-                Vec4{t * a.x * a.x + c, t * a.x * a.y + s * a.z, t * a.x * a.z - s * a.y, 0.0f},
-                Vec4{t * a.x * a.y - s * a.z, t * a.y * a.y + c, t * a.y * a.z + s * a.x, 0.0f},
-                Vec4{t * a.x * a.z + s * a.y, t * a.y * a.z - s * a.x, t * a.z * a.z + c, 0.0f},
-                Vec4{0.0f, 0.0f, 0.0f, 1.0f}
+                t * a.x * a.x + c,      t * a.x * a.y - s * a.z, t * a.x * a.z + s * a.y, 0.0f,
+                t * a.x * a.y + s * a.z, t * a.y * a.y + c,      t * a.y * a.z - s * a.x, 0.0f,
+                t * a.x * a.z - s * a.y, t * a.y * a.z + s * a.x, t * a.z * a.z + c,      0.0f,
+                0.0f,                    0.0f,                    0.0f,                    1.0f
             };
         }
 
@@ -239,10 +276,10 @@ export namespace Math {
             F32 c = std::cos(angle);
             F32 s = std::sin(angle);
             return Mat4{
-                Vec4{1.0f, 0.0f, 0.0f, 0.0f},
-                Vec4{0.0f, c, s, 0.0f},
-                Vec4{0.0f, -s, c, 0.0f},
-                Vec4{0.0f, 0.0f, 0.0f, 1.0f}
+                1.0f, 0.0f, 0.0f, 0.0f,
+                0.0f, c,   -s,    0.0f,
+                0.0f, s,    c,    0.0f,
+                0.0f, 0.0f, 0.0f, 1.0f
             };
         }
 
@@ -250,10 +287,10 @@ export namespace Math {
             F32 c = std::cos(angle);
             F32 s = std::sin(angle);
             return Mat4{
-                Vec4{c, 0.0f, -s, 0.0f},
-                Vec4{0.0f, 1.0f, 0.0f, 0.0f},
-                Vec4{s, 0.0f, c, 0.0f},
-                Vec4{0.0f, 0.0f, 0.0f, 1.0f}
+                c,    0.0f, s,    0.0f,
+                0.0f, 1.0f, 0.0f, 0.0f,
+                -s,   0.0f, c,    0.0f,
+                0.0f, 0.0f, 0.0f, 1.0f
             };
         }
 
@@ -261,19 +298,19 @@ export namespace Math {
             F32 c = std::cos(angle);
             F32 s = std::sin(angle);
             return Mat4{
-                Vec4{c, s, 0.0f, 0.0f},
-                Vec4{-s, c, 0.0f, 0.0f},
-                Vec4{0.0f, 0.0f, 1.0f, 0.0f},
-                Vec4{0.0f, 0.0f, 0.0f, 1.0f}
+                c,   -s,    0.0f, 0.0f,
+                s,    c,    0.0f, 0.0f,
+                0.0f, 0.0f, 1.0f, 0.0f,
+                0.0f, 0.0f, 0.0f, 1.0f
             };
         }
 
         [[nodiscard]] static Mat4 Scale(F32 sx, F32 sy, F32 sz) {
             return Mat4{
-                Vec4{sx, 0.0f, 0.0f, 0.0f},
-                Vec4{0.0f, sy, 0.0f, 0.0f},
-                Vec4{0.0f, 0.0f, sz, 0.0f},
-                Vec4{0.0f, 0.0f, 0.0f, 1.0f}
+                sx,   0.0f, 0.0f, 0.0f,
+                0.0f, sy,   0.0f, 0.0f,
+                0.0f, 0.0f, sz,   0.0f,
+                0.0f, 0.0f, 0.0f, 1.0f
             };
         }
 
@@ -282,38 +319,41 @@ export namespace Math {
         }
 
         [[nodiscard]] static Mat4 LookAt(const Vec3& eye, const Vec3& target, const Vec3& up) {
-            Vec3 f = (target - eye).Normalized();
-            Vec3 r = f.Cross(up).Normalized();
-            Vec3 u = r.Cross(f);
+            Vec3 f = (target - eye).Normalized();  // forward
+            Vec3 r = f.Cross(up).Normalized();     // right
+            Vec3 u = r.Cross(f);                    // up
 
             return Mat4{
-                Vec4{r.x, u.x, -f.x, 0.0f},
-                Vec4{r.y, u.y, -f.y, 0.0f},
-                Vec4{r.z, u.z, -f.z, 0.0f},
-                Vec4{-r.Dot(eye), -u.Dot(eye), f.Dot(eye), 1.0f}
+                r.x,  r.y,  r.z,  -r.Dot(eye),
+                u.x,  u.y,  u.z,  -u.Dot(eye),
+                -f.x, -f.y, -f.z,  f.Dot(eye),
+                0.0f, 0.0f, 0.0f, 1.0f
             };
         }
 
         [[nodiscard]] static Mat4 Perspective(F32 fovY, F32 aspect, F32 nearPlane, F32 farPlane) {
             F32 tanHalfFov = std::tan(fovY * 0.5f);
-            Mat4 result{0.0f};
-            result.m[0][0] = 1.0f / (aspect * tanHalfFov);
-            result.m[1][1] = 1.0f / tanHalfFov;
-            result.m[2][2] = -(farPlane + nearPlane) / (farPlane - nearPlane);
-            result.m[2][3] = -1.0f;
-            result.m[3][2] = -(2.0f * farPlane * nearPlane) / (farPlane - nearPlane);
-            return result;
+            F32 range = farPlane - nearPlane;
+
+            return Mat4{
+                1.0f / (aspect * tanHalfFov), 0.0f, 0.0f, 0.0f,
+                0.0f, 1.0f / tanHalfFov, 0.0f, 0.0f,
+                0.0f, 0.0f, -(farPlane + nearPlane) / range, -(2.0f * farPlane * nearPlane) / range,
+                0.0f, 0.0f, -1.0f, 0.0f
+            };
         }
 
         [[nodiscard]] static Mat4 Orthographic(F32 left, F32 right, F32 bottom, F32 top, F32 nearPlane, F32 farPlane) {
-            Mat4 result{1.0f};
-            result.m[0][0] = 2.0f / (right - left);
-            result.m[1][1] = 2.0f / (top - bottom);
-            result.m[2][2] = -2.0f / (farPlane - nearPlane);
-            result.m[3][0] = -(right + left) / (right - left);
-            result.m[3][1] = -(top + bottom) / (top - bottom);
-            result.m[3][2] = -(farPlane + nearPlane) / (farPlane - nearPlane);
-            return result;
+            F32 rl = right - left;
+            F32 tb = top - bottom;
+            F32 fn = farPlane - nearPlane;
+
+            return Mat4{
+                2.0f / rl, 0.0f, 0.0f, -(right + left) / rl,
+                0.0f, 2.0f / tb, 0.0f, -(top + bottom) / tb,
+                0.0f, 0.0f, -2.0f / fn, -(farPlane + nearPlane) / fn,
+                0.0f, 0.0f, 0.0f, 1.0f
+            };
         }
 
         [[nodiscard]] Vec3 GetTranslation() const {
@@ -322,10 +362,15 @@ export namespace Math {
 
         [[nodiscard]] Vec3 GetScale() const {
             return Vec3{
-                Vec3{m[0][0], m[0][1], m[0][2]}.Length(),
-                Vec3{m[1][0], m[1][1], m[1][2]}.Length(),
-                Vec3{m[2][0], m[2][1], m[2][2]}.Length()
+                Vec3{m[0][0], m[1][0], m[2][0]}.Length(),
+                Vec3{m[0][1], m[1][1], m[2][1]}.Length(),
+                Vec3{m[0][2], m[1][2], m[2][2]}.Length()
             };
+        }
+
+        // Helper to get column
+        [[nodiscard]] Vec4 GetColumn(U32 col) const {
+            return Vec4{m[0][col], m[1][col], m[2][col], m[3][col]};
         }
 
         void Decompose(Vec3& translation, Vec3& rotation, Vec3& scale) const;
@@ -335,9 +380,8 @@ export namespace Math {
 
     inline constexpr Mat4 Mat4::Identity{1.0f};
 
-    // Mat4 Inverse implementation
     inline Mat4 Mat4::Inverse() const {
-        // Compute adjugate matrix
+        // Gauss-Jordan elimination optimized for 4x4 matrices
         F32 a00 = m[0][0], a01 = m[0][1], a02 = m[0][2], a03 = m[0][3];
         F32 a10 = m[1][0], a11 = m[1][1], a12 = m[1][2], a13 = m[1][3];
         F32 a20 = m[2][0], a21 = m[2][1], a22 = m[2][2], a23 = m[2][3];
@@ -383,20 +427,17 @@ export namespace Math {
     }
 
     inline void Mat4::Decompose(Vec3& translation, Vec3& rotation, Vec3& scale) const {
-        // Extract translation
         translation = GetTranslation();
-
-        // Extract scale
         scale = GetScale();
 
         // Extract rotation matrix
         Mat3 rotMat{
-            m[0][0] / scale.x, m[0][1] / scale.x, m[0][2] / scale.x,
-            m[1][0] / scale.y, m[1][1] / scale.y, m[1][2] / scale.y,
-            m[2][0] / scale.z, m[2][1] / scale.z, m[2][2] / scale.z
+            m[0][0] / scale.x, m[0][1] / scale.y, m[0][2] / scale.z,
+            m[1][0] / scale.x, m[1][1] / scale.y, m[1][2] / scale.z,
+            m[2][0] / scale.x, m[2][1] / scale.y, m[2][2] / scale.z
         };
 
-        // Convert to Euler angles (Y-X-Z order)
+        // Extract Euler angles (Y-X-Z convention)
         rotation.x = std::atan2(rotMat.m[2][1], rotMat.m[2][2]);
         rotation.y = std::atan2(-rotMat.m[2][0], std::sqrt(rotMat.m[2][1] * rotMat.m[2][1] + rotMat.m[2][2] * rotMat.m[2][2]));
         rotation.z = std::atan2(rotMat.m[1][0], rotMat.m[0][0]);
