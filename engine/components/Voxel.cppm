@@ -1,73 +1,93 @@
 export module Components.Voxel;
 
-import Voxel.Types;
-import Voxel.Chunk;
-import Components.ComponentRegistry;
-import ECS.Component;
 import Core.Types;
+import Core.Assert;
+import ECS.Component;
+import Components.ComponentRegistry;
+import Math.Vector;
 import Graphics;
 import std;
 
-export namespace Voxel {
-    struct ChunkComponent {
-        std::unique_ptr<Chunk> chunk;
-        ChunkPos position;
-        bool needsRemesh{true};
+export enum class Voxel : U8 {
+    Air = 0,
+    Dirt = 1,
+    Grass = 2,
+    Stone = 3
+};
 
-        ChunkComponent() = default;
-        explicit ChunkComponent(const ChunkPos& pos) : chunk{std::make_unique<Chunk>(pos)}, position{pos} {}
-    };
+export struct VoxelWorldConfig {
+    U32 chunksX{1};
+    U32 chunksY{1};
+    U32 chunksZ{1};
+    F32 blockSize{1.0f};
+};
 
-    struct ChunkMesh {
-        U32 vertexBuffer{INVALID_INDEX};
-        U32 indexBuffer{INVALID_INDEX};
-        int vertexCount{0};
-        bool isValid{false};
-    };
+export struct VoxelChunk {
+    static constexpr U32 SizeX{32};
+    static constexpr U32 SizeY{32};
+    static constexpr U32 SizeZ{32};
 
-    struct ChunkNeighbors {
-        EntityHandle neighbors[6];
+    Math::Vec3 origin{0.0f, 0.0f, 0.0f};
+    Vector<Voxel> blocks{};
+    bool dirty{true};
+};
 
-        void SetNeighbor(Face face, EntityHandle handle) {
-            neighbors[static_cast<U8>(face)] = handle;
-        }
+export struct VoxelMesh {
+    Vector<Vertex> cpuVertices{};
+    U32 vertexBuffer{INVALID_INDEX};
+    U32 vertexCount{0};
+    bool gpuDirty{false};
+};
 
-        [[nodiscard]] EntityHandle GetNeighbor(Face face) const {
-            return neighbors[static_cast<U8>(face)];
-        }
-    };
+export struct VoxelRenderResources {
+    U32 pipeline{INVALID_INDEX};
+};
 
-    struct VoxelWorld {
-        UnorderedMap<ChunkPos, EntityHandle> chunkMap;
-        S32 viewDistances{8};
-        ChunkPos centerChunk;
-    };
+export template<>
+struct ComponentTypeID<VoxelWorldConfig> {
+    static consteval ComponentID value() { return VoxelWorldConfig_ID; }
+};
+
+export template<>
+struct ComponentTypeID<VoxelChunk> {
+    static consteval ComponentID value() { return VoxelChunk_ID; }
+};
+
+export template<>
+struct ComponentTypeID<VoxelMesh> {
+    static consteval ComponentID value() { return VoxelMesh_ID; }
+};
+
+export template<>
+struct ComponentTypeID<VoxelRenderResources> {
+    static consteval ComponentID value() { return VoxelRenderResources_ID; }
+};
+
+export inline USize VoxelIndex(U32 x, U32 y, U32 z) {
+    return static_cast<USize>(x)
+         + static_cast<USize>(y) * VoxelChunk::SizeX
+         + static_cast<USize>(z) * VoxelChunk::SizeX * VoxelChunk::SizeY;
 }
 
-template<>
-struct ComponentTypeID<Voxel::ChunkComponent> {
-    static consteval ComponentIDs value() {
-        return ChunkComponent_ID;
-    }
-};
+export inline bool InBounds(S32 x, S32 y, S32 z) {
+    return x >= 0 && y >= 0 && z >= 0
+        && x < static_cast<S32>(VoxelChunk::SizeX)
+        && y < static_cast<S32>(VoxelChunk::SizeY)
+        && z < static_cast<S32>(VoxelChunk::SizeZ);
+}
 
-template<>
-struct ComponentTypeID<Voxel::ChunkMesh> {
-    static consteval ComponentIDs value() {
-        return ChunkMesh_ID;
-    }
-};
+export inline U32 PackRGBA8(U8 r, U8 g, U8 b, U8 a) {
+    return static_cast<U32>(r)
+         | (static_cast<U32>(g) << 8)
+         | (static_cast<U32>(b) << 16)
+         | (static_cast<U32>(a) << 24);
+}
 
-template<>
-struct ComponentTypeID<Voxel::ChunkNeighbors> {
-    static consteval ComponentIDs value() {
-        return ChunkNeighbors_ID;
+export inline U32 ColorForVoxel(Voxel v) {
+    switch (v) {
+        case Voxel::Dirt:  return PackRGBA8(134, 96,  67,  255);
+        case Voxel::Grass: return PackRGBA8(95,  159, 53,  255);
+        case Voxel::Stone: return PackRGBA8(130, 130, 130, 255);
+        default:           return PackRGBA8(0,   0,   0,   0);
     }
-};
-
-template<>
-struct ComponentTypeID<Voxel::VoxelWorld> {
-    static consteval ComponentIDs value() {
-        return VoxelWorld_ID;
-    }
-};
+}

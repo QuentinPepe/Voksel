@@ -303,10 +303,34 @@ public:
     void Draw(U32 vertexCount, U32 instanceCount, U32 firstVertex, U32 firstInstance) override {
         assert(m_InRenderPass, "Must be in render pass");
 
-        m_CurrentPassData->commands.push_back([=](ID3D12GraphicsCommandList *cmd) {
+        const U32 pso = m_CurrentPipeline;
+        const U32 vb  = m_CurrentVertexBuffer;
+        const U32 ib  = m_CurrentIndexBuffer;
+
+        m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList* cmd) {
+            if (pso != INVALID_INDEX) {
+                m_Pipelines[pso]->Bind(cmd);
+                cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            }
+            if (vb != INVALID_INDEX) {
+                D3D12_VERTEX_BUFFER_VIEW vbView{};
+                vbView.BufferLocation = m_VertexBuffers[vb]->GetGPUAddress();
+                vbView.SizeInBytes    = (UINT)m_VertexBuffers[vb]->GetDesc().size;
+                vbView.StrideInBytes  = sizeof(Vertex);
+                cmd->IASetVertexBuffers(0, 1, &vbView);
+            }
+            if (ib != INVALID_INDEX) {
+                D3D12_INDEX_BUFFER_VIEW ibView{};
+                ibView.BufferLocation = m_IndexBuffers[ib]->GetGPUAddress();
+                ibView.SizeInBytes    = (UINT)m_IndexBuffers[ib]->GetDesc().size;
+                ibView.Format         = DXGI_FORMAT_R32_UINT;
+                cmd->IASetIndexBuffer(&ibView);
+            }
+
             cmd->DrawInstanced(vertexCount, instanceCount, firstVertex, firstInstance);
         });
     }
+
 
     void DrawIndexed(U32 indexCount, U32 instanceCount, U32 firstIndex, S32 vertexOffset, U32 firstInstance) override {
         assert(m_InRenderPass, "Must be in render pass");

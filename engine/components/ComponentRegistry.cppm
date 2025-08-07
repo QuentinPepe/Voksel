@@ -12,10 +12,10 @@ export enum ComponentIDs : ComponentID {
     CameraController_ID,
 
     // Voxel
-    ChunkComponent_ID,
-    ChunkMesh_ID,
-    ChunkNeighbors_ID,
-    VoxelWorld_ID,
+    VoxelWorldConfig_ID,
+    VoxelChunk_ID,
+    VoxelMesh_ID,
+    VoxelRenderResources_ID,
 
     // Game specific components
     GAME_COMPONENT_START

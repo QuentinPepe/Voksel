@@ -46,7 +46,8 @@ export class ComponentRegistry {
 public:
     template<typename T>
     static consteval ComponentID GetID() {
-        return ComponentTypeID<T>::value();
+        using U = std::remove_cvref_t<T>;
+        return ComponentTypeID<U>::value();
     }
 };
 

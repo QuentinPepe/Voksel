@@ -102,14 +102,18 @@ public:
     void AddComponent(EntityHandle handle, T&& component) {
         assert(handle.valid(), "Invalid entity handle");
 
-        ComponentID componentID = ComponentRegistry::GetID<T>();
+        using U = std::remove_cvref_t<T>;
+
+        const ComponentID componentID{ ComponentRegistry::GetID<U>() };
 
         if (!m_Storages.contains(componentID)) {
-            m_Storages[componentID] = std::make_unique<TypedStorage<T>>();
+            m_Storages[componentID] = std::make_unique<TypedStorage<U>>();
         }
 
-        auto* typedStorage = static_cast<TypedStorage<T>*>(m_Storages[componentID].get());
-        typedStorage->GetStorage()->Insert(handle, std::forward<T>(component));
+        auto* typed = static_cast<TypedStorage<U>*>(m_Storages[componentID].get());
+
+        U tmp{ std::forward<T>(component) };
+        typed->GetStorage()->Insert(handle, std::move(tmp));
 
         m_EntityArchetypes[handle] |= (1ULL << componentID);
     }
@@ -118,12 +122,13 @@ public:
     void RemoveComponent(EntityHandle handle) {
         if (!handle.valid()) return;
 
-        ComponentID componentID = ComponentRegistry::GetID<T>();
+        using U = std::remove_cvref_t<T>;
+        const ComponentID componentID{ ComponentRegistry::GetID<U>() };
+
         auto it = m_Storages.find(componentID);
         if (it == m_Storages.end()) return;
 
         it->second->Remove(handle);
-
         m_EntityArchetypes[handle] &= ~(1ULL << componentID);
     }
 
@@ -131,7 +136,9 @@ public:
     [[nodiscard]] T* GetComponent(EntityHandle handle) {
         if (!handle.valid()) return nullptr;
 
-        ComponentID componentID = ComponentRegistry::GetID<T>();
+        using U = std::remove_cvref_t<T>;
+        const ComponentID componentID{ ComponentRegistry::GetID<U>() };
+
         auto it = m_Storages.find(componentID);
         if (it == m_Storages.end()) return nullptr;
 
@@ -144,12 +151,14 @@ public:
     }
 
     template<typename T>
-    [[nodiscard]] ComponentStorage<T>* GetStorage() {
-        ComponentID componentID = ComponentRegistry::GetID<T>();
+    [[nodiscard]] ComponentStorage<std::remove_cvref_t<T>>* GetStorage() {
+        using U = std::remove_cvref_t<T>;
+        const ComponentID componentID{ ComponentRegistry::GetID<U>() };
+
         auto it = m_Storages.find(componentID);
         if (it == m_Storages.end()) return nullptr;
 
-        return static_cast<TypedStorage<T>*>(it->second.get())->GetStorage();
+        return static_cast<TypedStorage<U>*>(it->second.get())->GetStorage();
     }
 
     [[nodiscard]] Archetype GetEntityArchetype(EntityHandle handle) const {
