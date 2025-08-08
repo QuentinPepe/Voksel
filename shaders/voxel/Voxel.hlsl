@@ -17,11 +17,12 @@ cbuffer AtlasCB : register(b2) {
 }
 Texture2D gAtlas : register(t0);
 SamplerState gSamp : register(s0);
+
 struct VSIn {
-    float3 pos   : POSITION;
-    float3 nrm   : NORMAL;
-    float2 uv    : TEXCOORD;
-    uint   mat   : COLOR;
+    float3 pos : POSITION;
+    float3 nrm : NORMAL;
+    float2 uv  : TEXCOORD;
+    uint   mat : COLOR;
 };
 struct VSOut {
     float4 svpos : SV_Position;
@@ -29,24 +30,25 @@ struct VSOut {
     float2 uv    : TEXCOORD0;
     uint   mat   : COLOR0;
 };
-VSOut VSMain(VSIn input) {
+
+VSOut VSMain(VSIn i) {
     VSOut o;
-    float4 wp = mul(float4(input.pos, 1.0f), gWorld);
+    float4 wp = mul(float4(i.pos,1.0f), gWorld);
     o.svpos = mul(wp, gViewProj);
-    o.nrm = normalize(mul(float4(input.nrm,0.0f), gWorld).xyz);
-    o.uv = input.uv;
-    o.mat = input.mat;
+    o.nrm = normalize(mul(float4(i.nrm,0.0f), gWorld).xyz);
+    o.uv = i.uv;
+    o.mat = i.mat;
     return o;
 }
-float4 PSMain(VSOut input) : SV_Target {
-    uint tileIndex = input.mat;
-    uint tx = tileIndex % tilesX;
-    uint ty = tileIndex / tilesX;
-    float2 basePx = float2(tx * (tileSize + 2 * pad) + pad, ty * (tileSize + 2 * pad) + pad);
-    float2 spanPx = float2(tileSize - 2 * pad, tileSize - 2 * pad);
-    float2 fuv = frac(input.uv);
-    float2 atlasPx = basePx + fuv * spanPx;
-    float2 atlasUV = atlasPx / float2(atlasW, atlasH);
-    float4 albedo = gAtlas.Sample(gSamp, atlasUV);
-    return albedo;
+
+float4 PSMain(VSOut i) : SV_Target {
+    uint tx = i.mat % tilesX;
+    uint ty = i.mat / tilesX;
+    uint2 basePx = uint2(tx * (tileSize + 2 * pad) + pad,
+                         ty * (tileSize + 2 * pad) + pad);
+
+    float2 fuv = frac(i.uv);
+    uint2 px = basePx + (uint2)floor(fuv * tileSize);
+
+    return gAtlas.Load(int3(px, 0));
 }

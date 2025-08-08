@@ -30,6 +30,7 @@ using Microsoft::WRL::ComPtr;
 
 struct ResourceHandle {
     enum Type { VertexBuffer, IndexBuffer, Pipeline } type;
+
     U32 index;
 };
 
@@ -43,13 +44,25 @@ private:
     std::vector<std::unique_ptr<Buffer> > m_ConstantBuffers;
     std::vector<std::unique_ptr<GraphicsPipeline> > m_Pipelines;
     std::vector<std::unique_ptr<RootSignature> > m_RootSignatures;
-    struct TextureEntry { std::unique_ptr<Texture> tex; DescriptorHandle srv; U32 width; U32 height; };
+
+    struct TextureEntry {
+        std::unique_ptr<Texture> tex;
+        DescriptorHandle srv;
+        U32 width;
+        U32 height;
+    };
+
     std::vector<TextureEntry> m_Textures;
     U32 m_CurrentPipeline = INVALID_INDEX;
     U32 m_CurrentVertexBuffer = INVALID_INDEX;
     U32 m_CurrentIndexBuffer = INVALID_INDEX;
     bool m_InRenderPass = false;
-    struct FramePassData { std::vector<std::function<void(ID3D12GraphicsCommandList *)> > commands; RenderPassInfo passInfo; };
+
+    struct FramePassData {
+        std::vector<std::function<void(ID3D12GraphicsCommandList *)> > commands;
+        RenderPassInfo passInfo;
+    };
+
     std::unique_ptr<FramePassData> m_CurrentPassData;
 
 public:
@@ -104,112 +117,102 @@ public:
     }
 
     U32 CreateGraphicsPipeline(const GraphicsPipelineCreateInfo &info) override {
-        std::vector<D3D12_ROOT_PARAMETER> rootParams;
-        D3D12_ROOT_PARAMETER cameraParam = {};
-        cameraParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-        cameraParam.Descriptor.ShaderRegister = 0;
-        cameraParam.Descriptor.RegisterSpace = 0;
-        cameraParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        rootParams.push_back(cameraParam);
-        D3D12_ROOT_PARAMETER objectParam = {};
-        objectParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-        objectParam.Descriptor.ShaderRegister = 1;
-        objectParam.Descriptor.RegisterSpace = 0;
-        objectParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        rootParams.push_back(objectParam);
-        D3D12_DESCRIPTOR_RANGE range = {};
+        std::vector<D3D12_ROOT_PARAMETER> rootParams{};
+        D3D12_ROOT_PARAMETER p0{};
+        p0.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        p0.Descriptor = {0, 0};
+        p0.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        rootParams.push_back(p0);
+        D3D12_ROOT_PARAMETER p1{};
+        p1.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        p1.Descriptor = {1, 0};
+        p1.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        rootParams.push_back(p1);
+        D3D12_DESCRIPTOR_RANGE range{};
         range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
         range.NumDescriptors = 1;
         range.BaseShaderRegister = 0;
         range.RegisterSpace = 0;
         range.OffsetInDescriptorsFromTableStart = 0;
-        D3D12_ROOT_DESCRIPTOR_TABLE table = {};
+        D3D12_ROOT_DESCRIPTOR_TABLE table{};
         table.NumDescriptorRanges = 1;
         table.pDescriptorRanges = &range;
-        D3D12_ROOT_PARAMETER srvTable = {};
-        srvTable.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        srvTable.DescriptorTable = table;
-        srvTable.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-        rootParams.push_back(srvTable);
-        D3D12_ROOT_PARAMETER atlasParam = {};
-        atlasParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-        atlasParam.Descriptor.ShaderRegister = 2;
-        atlasParam.Descriptor.RegisterSpace = 0;
-        atlasParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-        rootParams.push_back(atlasParam);
-        D3D12_STATIC_SAMPLER_DESC staticSampler = {};
-        staticSampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-        staticSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        staticSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        staticSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-        staticSampler.MipLODBias = 0.0f;
-        staticSampler.MaxAnisotropy = 1;
-        staticSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-        staticSampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
-        staticSampler.MinLOD = 0.0f;
-        staticSampler.MaxLOD = D3D12_FLOAT32_MAX;
-        staticSampler.ShaderRegister = 0;
-        staticSampler.RegisterSpace = 0;
-        staticSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-        D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
-        rootSigDesc.NumParameters = static_cast<UINT>(rootParams.size());
-        rootSigDesc.pParameters = rootParams.data();
-        rootSigDesc.NumStaticSamplers = 1;
-        rootSigDesc.pStaticSamplers = &staticSampler;
-        rootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
-                            D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
-                            D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
-                            D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
-        auto rootSig = std::make_unique<RootSignature>(m_Renderer->GetDevice(), rootSigDesc);
-        GraphicsPipelineDesc pipelineDesc;
-        for (const auto &shader: info.shaders) {
-            std::string target;
-            switch (shader.stage) {
-                case ShaderStage::Vertex: target = "vs_5_0"; break;
-                case ShaderStage::Pixel: target = "ps_5_0"; break;
-                case ShaderStage::Geometry: target = "gs_5_0"; break;
-                case ShaderStage::Hull: target = "hs_5_0"; break;
-                case ShaderStage::Domain: target = "ds_5_0"; break;
-                default: assert(false, "Invalid shader stage for graphics pipeline");
-            }
-            ShaderBytecode bytecode;
-            if (shader.source.find('\n') == std::string::npos && shader.source.ends_with(".hlsl")) {
-                bytecode = m_ShaderManager->LoadShader(shader.source, shader.entryPoint, target);
-            } else {
-                bytecode = m_ShaderManager->CompileShaderFromSource(shader.source, "inline_shader", shader.entryPoint, target);
-            }
-            switch (shader.stage) {
-                case ShaderStage::Vertex: pipelineDesc.vertexShader = bytecode; break;
-                case ShaderStage::Pixel: pipelineDesc.pixelShader = bytecode; break;
-                case ShaderStage::Geometry: pipelineDesc.geometryShader = bytecode; break;
-                case ShaderStage::Hull: pipelineDesc.hullShader = bytecode; break;
-                case ShaderStage::Domain: pipelineDesc.domainShader = bytecode; break;
-                default: break;
-            }
+        D3D12_ROOT_PARAMETER p2{};
+        p2.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        p2.DescriptorTable = table;
+        p2.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        rootParams.push_back(p2);
+        D3D12_ROOT_PARAMETER p3{};
+        p3.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        p3.Descriptor = {2, 0};
+        p3.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        rootParams.push_back(p3);
+
+        D3D12_STATIC_SAMPLER_DESC samp{};
+        samp.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+        samp.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samp.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samp.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samp.MipLODBias = 0.0f;
+        samp.MaxAnisotropy = 1;
+        samp.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+        samp.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+        samp.MinLOD = 0.0f;
+        samp.MaxLOD = 0.0f;
+        samp.ShaderRegister = 0;
+        samp.RegisterSpace = 0;
+        samp.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+        D3D12_ROOT_SIGNATURE_DESC rs{};
+        rs.NumParameters = static_cast<UINT>(rootParams.size());
+        rs.pParameters = rootParams.data();
+        rs.NumStaticSamplers = 1;
+        rs.pStaticSamplers = &samp;
+        rs.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
+                   | D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS
+                   | D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS
+                   | D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
+
+        auto rootSig{std::make_unique<RootSignature>(m_Renderer->GetDevice(), rs)};
+
+        GraphicsPipelineDesc pd{};
+        for (auto const &sh: info.shaders) {
+            std::string target{};
+            if (sh.stage == ShaderStage::Vertex) target = "vs_5_0";
+            else if (sh.stage == ShaderStage::Pixel) target = "ps_5_0";
+            else assert(false, "Unsupported stage");
+            ShaderBytecode bc{};
+            if (sh.source.find('\n') == std::string::npos && sh.source.ends_with(".hlsl"))
+                bc = m_ShaderManager->LoadShader(sh.source, sh.entryPoint, target);
+            else bc = m_ShaderManager->CompileShaderFromSource(sh.source, "inline_shader", sh.entryPoint, target);
+            if (sh.stage == ShaderStage::Vertex) pd.vertexShader = bc;
+            if (sh.stage == ShaderStage::Pixel) pd.pixelShader = bc;
         }
-        std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayout;
-        for (const auto &[name, attrOffset]: info.vertexAttributes) {
-            DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
-            if (name == "POSITION") format = DXGI_FORMAT_R32G32B32_FLOAT;
-            else if (name == "NORMAL") format = DXGI_FORMAT_R32G32B32_FLOAT;
-            else if (name == "TEXCOORD") format = DXGI_FORMAT_R32G32_FLOAT;
-            else if (name == "COLOR") format = DXGI_FORMAT_R32_UINT;
-            else format = DXGI_FORMAT_R32G32B32_FLOAT;
-            inputLayout.push_back({name.c_str(), 0, format, 0, attrOffset, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0});
+
+        std::vector<D3D12_INPUT_ELEMENT_DESC> layout{};
+        for (auto const &[name, off]: info.vertexAttributes) {
+            DXGI_FORMAT fmt{DXGI_FORMAT_R32G32B32_FLOAT};
+            if (name == "NORMAL") fmt = DXGI_FORMAT_R32G32B32_FLOAT;
+            else if (name == "TEXCOORD") fmt = DXGI_FORMAT_R32G32_FLOAT;
+            else if (name == "COLOR") fmt = DXGI_FORMAT_R32_UINT;
+            layout.push_back(D3D12_INPUT_ELEMENT_DESC{
+                name.c_str(), 0, fmt, 0, off, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
+            });
         }
-        pipelineDesc.inputLayout = std::move(inputLayout);
-        pipelineDesc.rootSignature = rootSig->GetRootSignature();
-        pipelineDesc.primitiveTopology = ConvertTopology(info.topology);
-        pipelineDesc.numRenderTargets = 1;
-        pipelineDesc.rtvFormats[0] = m_Renderer->GetSwapChain().GetFormat();
-        pipelineDesc.dsvFormat = DXGI_FORMAT_D32_FLOAT;
-        if (!info.depthTest) pipelineDesc.depthStencilState.DepthEnable = FALSE;
-        if (!info.depthWrite) pipelineDesc.depthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-        auto pipeline = std::make_unique<GraphicsPipeline>(m_Renderer->GetDevice(), pipelineDesc);
-        U32 handle = static_cast<U32>(m_Pipelines.size());
+        pd.inputLayout = std::move(layout);
+        pd.rootSignature = rootSig->GetRootSignature();
+        pd.primitiveTopology = ConvertTopology(info.topology);
+        pd.numRenderTargets = 1;
+        pd.rtvFormats[0] = m_Renderer->GetSwapChain().GetFormat();
+        pd.dsvFormat = DXGI_FORMAT_D32_FLOAT;
+        if (!info.depthTest) pd.depthStencilState.DepthEnable = FALSE;
+        if (!info.depthWrite) pd.depthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+
+        auto pipeline{std::make_unique<GraphicsPipeline>(m_Renderer->GetDevice(), pd)};
+        U32 id{static_cast<U32>(m_Pipelines.size())};
         m_Pipelines.push_back(std::move(pipeline));
         m_RootSignatures.push_back(std::move(rootSig));
-        return handle;
+        return id;
     }
 
     void BeginFrame() override {
@@ -238,7 +241,8 @@ public:
         m_CurrentPassData = std::make_unique<FramePassData>();
         m_Renderer->GetRenderGraph().AddPass<FramePassData>(
             passData->passInfo.name,
-            [](RenderGraphBuilder &, FramePassData &) {},
+            [](RenderGraphBuilder &, FramePassData &) {
+            },
             [this, passData](const RenderGraphResources &, CommandList &cmdList, const FramePassData &) {
                 ExecuteRenderPass(cmdList, *passData);
             }
@@ -314,7 +318,8 @@ public:
         ID3D12Resource *resource = tex->GetResource();
         D3D12_RESOURCE_DESC rd = resource->GetDesc();
         U64 uploadSize = 0;
-        m_Renderer->GetDevice().GetDevice()->GetCopyableFootprints(&rd, 0, 1, 0, nullptr, nullptr, nullptr, &uploadSize);
+        m_Renderer->GetDevice().GetDevice()->
+                GetCopyableFootprints(&rd, 0, 1, 0, nullptr, nullptr, nullptr, &uploadSize);
         D3D12_HEAP_PROPERTIES heapProps{};
         heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
         D3D12_RESOURCE_DESC bufDesc{};
@@ -328,7 +333,9 @@ public:
         bufDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
         bufDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
         ComPtr<ID3D12Resource> upload;
-        assert(SUCCEEDED(m_Renderer->GetDevice().GetDevice()->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &bufDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upload))), "Failed to create upload buffer");
+        assert(SUCCEEDED(
+            m_Renderer->GetDevice().GetDevice()->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &bufDesc,
+                D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upload))), "Failed to create upload buffer");
         D3D12_SUBRESOURCE_DATA sub{};
         sub.pData = rgba8;
         sub.RowPitch = static_cast<LONG_PTR>(width) * 4;
@@ -390,21 +397,36 @@ public:
 private:
     void ExecuteRenderPass(CommandList &cmdList, const FramePassData &passData) const {
         auto *cmd = cmdList.GetCommandList();
-        D3D12_VIEWPORT viewport = {0.0f, 0.0f, static_cast<float>(m_Renderer->GetSwapChain().GetWidth()), static_cast<float>(m_Renderer->GetSwapChain().GetHeight()), 0.0f, 1.0f};
-        D3D12_RECT scissor = {0, 0, static_cast<LONG>(m_Renderer->GetSwapChain().GetWidth()), static_cast<LONG>(m_Renderer->GetSwapChain().GetHeight())};
+        D3D12_VIEWPORT viewport = {
+            0.0f, 0.0f, static_cast<float>(m_Renderer->GetSwapChain().GetWidth()),
+            static_cast<float>(m_Renderer->GetSwapChain().GetHeight()), 0.0f, 1.0f
+        };
+        D3D12_RECT scissor = {
+            0, 0, static_cast<LONG>(m_Renderer->GetSwapChain().GetWidth()),
+            static_cast<LONG>(m_Renderer->GetSwapChain().GetHeight())
+        };
         cmd->RSSetViewports(1, &viewport);
         cmd->RSSetScissorRects(1, &scissor);
         ID3D12DescriptorHeap *heaps[] = {m_Renderer->GetCbvSrvUavHeap()->GetCurrentHeap()};
         cmd->SetDescriptorHeaps(1, heaps);
-        Resource rtResource(m_Renderer->GetCurrentRenderTarget(), D3D12_RESOURCE_STATE_PRESENT, ResourceType::Texture2D);
+        Resource rtResource(m_Renderer->GetCurrentRenderTarget(), D3D12_RESOURCE_STATE_PRESENT,
+                            ResourceType::Texture2D);
         rtResource.SetTracked(true);
         cmdList.TransitionResource(rtResource, D3D12_RESOURCE_STATE_RENDER_TARGET);
         auto rtvHandle = m_Renderer->GetCurrentRTV();
         auto dsvHandle = m_Renderer->GetDSV();
         cmd->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-        if (passData.passInfo.clearColor) { cmd->ClearRenderTargetView(rtvHandle, passData.passInfo.clearColorValue, 0, nullptr); }
-        if (passData.passInfo.clearDepth) { cmd->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, passData.passInfo.clearDepthValue, 0, 0, nullptr); }
-        if (m_CurrentPipeline != INVALID_INDEX) { m_Pipelines[m_CurrentPipeline]->Bind(cmd); cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); }
+        if (passData.passInfo.clearColor) {
+            cmd->ClearRenderTargetView(rtvHandle, passData.passInfo.clearColorValue, 0, nullptr);
+        }
+        if (passData.passInfo.clearDepth) {
+            cmd->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, passData.passInfo.clearDepthValue, 0, 0,
+                                       nullptr);
+        }
+        if (m_CurrentPipeline != INVALID_INDEX) {
+            m_Pipelines[m_CurrentPipeline]->Bind(cmd);
+            cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        }
         if (m_CurrentVertexBuffer != INVALID_INDEX) {
             D3D12_VERTEX_BUFFER_VIEW vbView;
             vbView.BufferLocation = m_VertexBuffers[m_CurrentVertexBuffer]->GetGPUAddress();
