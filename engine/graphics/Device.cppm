@@ -12,18 +12,19 @@ export module Graphics.DX12.Device;
 
 import Core.Types;
 import Core.Log;
+import Core.Assert;
 
 using Microsoft::WRL::ComPtr;
 
 export struct DeviceConfig {
-    bool enableDebugLayer = true;
+    bool enableDebugLayer{true};
 };
 
 export class Device {
 public:
     Device() : Device{DeviceConfig{}} {}
 
-    explicit Device(const DeviceConfig& config) {
+    explicit Device(DeviceConfig const& config) {
         InitializeFactory(config);
         SelectAdapter();
         CreateDevice();
@@ -33,227 +34,166 @@ public:
 
     ~Device() {
         if (m_DirectQueue) {
-            ID3D12Fence *fence = nullptr;
-            UINT64 fenceValue = 0;
-
-            if (SUCCEEDED(m_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)))) {
-                fenceValue = 1;
-                m_DirectQueue->Signal(fence, fenceValue);
-
-                if (fence->GetCompletedValue() < fenceValue) {
-                    HANDLE eventHandle = CreateEventEx(nullptr, nullptr, false, EVENT_ALL_ACCESS);
-                    if (eventHandle) {
-                        fence->SetEventOnCompletion(fenceValue, eventHandle);
-                        WaitForSingleObject(eventHandle, INFINITE);
-                        CloseHandle(eventHandle);
-                    }
-                }
-                fence->Release();
+            ComPtr<ID3D12Fence> fence{};
+            assert(SUCCEEDED(m_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(fence.GetAddressOf()))),
+                   "CreateFence failed");
+            HANDLE evt{CreateEvent(nullptr, FALSE, FALSE, nullptr)};
+            assert(evt != nullptr, "CreateEvent failed");
+            UINT64 v{1};
+            assert(SUCCEEDED(m_DirectQueue->Signal(fence.Get(), v)), "Signal failed");
+            if (fence->GetCompletedValue() < v) {
+                assert(SUCCEEDED(fence->SetEventOnCompletion(v, evt)), "SetEventOnCompletion failed");
+                WaitForSingleObject(evt, INFINITE);
             }
+            CloseHandle(evt);
         }
 
-        if (m_DirectQueue) {
-            m_DirectQueue->Release();
-            m_DirectQueue = nullptr;
-        }
-
-        if (m_ComputeQueue) {
-            m_ComputeQueue->Release();
-            m_ComputeQueue = nullptr;
-        }
-
-        if (m_CopyQueue) {
-            m_CopyQueue->Release();
-            m_CopyQueue = nullptr;
-        }
-
-        if (m_Adapter) {
-            m_Adapter->Release();
-            m_Adapter = nullptr;
-        }
-
-        if (m_Device) {
-            m_Device->Release();
-            m_Device = nullptr;
-        }
-
-        if (m_Factory) {
-            m_Factory->Release();
-            m_Factory = nullptr;
-        }
+        m_CopyQueue.Reset();
+        m_ComputeQueue.Reset();
+        m_DirectQueue.Reset();
+        m_Adapter.Reset();
+        m_Device.Reset();
+        m_Factory.Reset();
 
 #ifdef _DEBUG
-        {
-            IDXGIDebug1 *dxgiDebug = nullptr;
-            if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug)))) {
-                dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL,
-                                             DXGI_DEBUG_RLO_FLAGS(
-                                                 DXGI_DEBUG_RLO_SUMMARY | DXGI_DEBUG_RLO_IGNORE_INTERNAL));
-                dxgiDebug->Release();
-            }
+        ComPtr<IDXGIDebug1> dxgiDebug{};
+        if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(dxgiDebug.GetAddressOf())))) {
+            dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL,
+                                         DXGI_DEBUG_RLO_FLAGS(DXGI_DEBUG_RLO_SUMMARY | DXGI_DEBUG_RLO_IGNORE_INTERNAL));
         }
 #endif
     }
 
-    ID3D12Device8 *GetDevice() const { return m_Device; }
-    IDXGIFactory6 *GetFactory() const { return m_Factory; }
-    IDXGIAdapter4 *GetAdapter() const { return m_Adapter; }
+    ID3D12Device8* GetDevice() const { return m_Device.Get(); }
+    IDXGIFactory6* GetFactory() const { return m_Factory.Get(); }
+    IDXGIAdapter4* GetAdapter() const { return m_Adapter.Get(); }
 
-    ID3D12CommandQueue *GetDirectQueue() const { return m_DirectQueue; }
-    ID3D12CommandQueue *GetComputeQueue() const { return m_ComputeQueue; }
-    ID3D12CommandQueue *GetCopyQueue() const { return m_CopyQueue; }
+    ID3D12CommandQueue* GetDirectQueue() const { return m_DirectQueue.Get(); }
+    ID3D12CommandQueue* GetComputeQueue() const { return m_ComputeQueue.Get(); }
+    ID3D12CommandQueue* GetCopyQueue() const { return m_CopyQueue.Get(); }
 
-    void SetCommandQueue(ID3D12CommandQueue *queue) { m_DirectQueue = queue; }
+    void SetCommandQueue(ID3D12CommandQueue* queue) { m_DirectQueue = queue; }
 
     bool SupportsRayTracing() const { return m_Features.rayTracing; }
     bool SupportsMeshShaders() const { return m_Features.meshShaders; }
     bool SupportsVariableRateShading() const { return m_Features.variableRateShading; }
 
 private:
-    void InitializeFactory(const DeviceConfig& config) {
-        UINT dxgiFactoryFlags = 0;
-
+    void InitializeFactory(DeviceConfig const& config) {
+        UINT flags{0};
 #ifdef _DEBUG
         if (config.enableDebugLayer) {
-            ComPtr<ID3D12Debug> debugController;
-            if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
+            ComPtr<ID3D12Debug> debugController{};
+            if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(debugController.GetAddressOf())))) {
                 debugController->EnableDebugLayer();
-                dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+                flags |= DXGI_CREATE_FACTORY_DEBUG;
             }
         }
 #endif
-
-        HRESULT hr = CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&m_Factory));
-        if (FAILED(hr)) {
-            Logger::Error(LogGraphics, "Failed to create DXGI factory");
-        }
+        assert(SUCCEEDED(CreateDXGIFactory2(flags, IID_PPV_ARGS(m_Factory.GetAddressOf()))),
+               "CreateDXGIFactory2 failed");
     }
 
     void SelectAdapter() {
-        IDXGIAdapter1 *adapter = nullptr;
+        for (UINT i{0};; ++i) {
+            ComPtr<IDXGIAdapter1> tmp{};
+            HRESULT hr{m_Factory->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+                                                             IID_PPV_ARGS(tmp.GetAddressOf()))};
+            if (hr == DXGI_ERROR_NOT_FOUND) break;
 
-        for (UINT i = 0; m_Factory->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
-                                                               IID_PPV_ARGS(&adapter)) != DXGI_ERROR_NOT_FOUND; ++i) {
-            DXGI_ADAPTER_DESC1 desc;
-            adapter->GetDesc1(&desc);
+            DXGI_ADAPTER_DESC1 desc{};
+            tmp->GetDesc1(&desc);
+            if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
 
-            if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
-                adapter->Release();
-                continue;
-            }
-
-            if (SUCCEEDED(D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_12_0, __uuidof(ID3D12Device), nullptr))) {
-                adapter->QueryInterface(IID_PPV_ARGS(&m_Adapter));
+            if (SUCCEEDED(D3D12CreateDevice(tmp.Get(), D3D_FEATURE_LEVEL_12_0, __uuidof(ID3D12Device), nullptr))) {
+                assert(SUCCEEDED(tmp.As(&m_Adapter)), "IDXGIAdapter4 query failed");
                 break;
             }
-
-            adapter->Release();
         }
 
-        if (!m_Adapter) {
-            Logger::Error(LogGraphics, "No suitable GPU adapter found");
-        }
+        assert(static_cast<bool>(m_Adapter), "No suitable GPU adapter found");
 
-        DXGI_ADAPTER_DESC1 desc;
+        DXGI_ADAPTER_DESC1 desc{};
         m_Adapter->GetDesc1(&desc);
-
-        std::wstring wName(desc.Description);
-        std::string name;
+        std::wstring wName{desc.Description};
+        std::string name{};
         name.reserve(wName.size());
-        for (wchar_t wc : wName) {
-            name.push_back(static_cast<char>(wc));
-        }
+        for (wchar_t wc : wName) name.push_back(static_cast<char>(wc));
         Logger::Info(LogGraphics, "Selected GPU: {}", name);
     }
 
     void CreateDevice() {
-        HRESULT hr = D3D12CreateDevice(m_Adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&m_Device));
-        if (FAILED(hr)) {
-            Logger::Error(LogGraphics, "Failed to create D3D12 device");
-        }
-
+        assert(SUCCEEDED(D3D12CreateDevice(m_Adapter.Get(), D3D_FEATURE_LEVEL_12_0,
+                                           IID_PPV_ARGS(m_Device.GetAddressOf()))),
+               "D3D12CreateDevice failed");
 #ifdef _DEBUG
-        ComPtr<ID3D12InfoQueue> infoQueue;
-        if (SUCCEEDED(m_Device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
+        ComPtr<ID3D12InfoQueue> infoQueue{};
+        if (SUCCEEDED(m_Device->QueryInterface(IID_PPV_ARGS(infoQueue.GetAddressOf())))) {
             infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
             infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
             infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
-
-            D3D12_MESSAGE_SEVERITY severities[] = {D3D12_MESSAGE_SEVERITY_INFO};
-            D3D12_MESSAGE_ID denyIds[] = {
+            D3D12_MESSAGE_SEVERITY severities[]{D3D12_MESSAGE_SEVERITY_INFO};
+            D3D12_MESSAGE_ID denyIds[]{
                 D3D12_MESSAGE_ID_CLEARRENDERTARGETVIEW_MISMATCHINGCLEARVALUE,
                 D3D12_MESSAGE_ID_MAP_INVALID_NULLRANGE,
                 D3D12_MESSAGE_ID_UNMAP_INVALID_NULLRANGE
             };
-
-            D3D12_INFO_QUEUE_FILTER filter = {};
-            filter.DenyList.NumSeverities = _countof(severities);
+            D3D12_INFO_QUEUE_FILTER filter{};
+            filter.DenyList.NumSeverities = static_cast<UINT>(_countof(severities));
             filter.DenyList.pSeverityList = severities;
-            filter.DenyList.NumIDs = _countof(denyIds);
+            filter.DenyList.NumIDs = static_cast<UINT>(_countof(denyIds));
             filter.DenyList.pIDList = denyIds;
-
             infoQueue->PushStorageFilter(&filter);
         }
 #endif
     }
 
     void CreateCommandQueues() {
-        D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-        queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-        queueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
-        queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-        queueDesc.NodeMask = 0;
+        D3D12_COMMAND_QUEUE_DESC qd{};
+        qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+        qd.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
+        qd.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+        qd.NodeMask = 0;
+        assert(SUCCEEDED(m_Device->CreateCommandQueue(&qd, IID_PPV_ARGS(m_DirectQueue.GetAddressOf()))),
+               "Create direct queue failed");
 
-        HRESULT hr = m_Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_DirectQueue));
-        if (FAILED(hr)) {
-            Logger::Error(LogGraphics, "Failed to create direct command queue");
-        }
+        qd.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+        assert(SUCCEEDED(m_Device->CreateCommandQueue(&qd, IID_PPV_ARGS(m_ComputeQueue.GetAddressOf()))),
+               "Create compute queue failed");
 
-        queueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
-        hr = m_Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_ComputeQueue));
-        if (FAILED(hr)) {
-            Logger::Error(LogGraphics, "Failed to create compute command queue");
-        }
-
-        queueDesc.Type = D3D12_COMMAND_LIST_TYPE_COPY;
-        hr = m_Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_CopyQueue));
-        if (FAILED(hr)) {
-            Logger::Error(LogGraphics, "Failed to create copy command queue");
-        }
+        qd.Type = D3D12_COMMAND_LIST_TYPE_COPY;
+        assert(SUCCEEDED(m_Device->CreateCommandQueue(&qd, IID_PPV_ARGS(m_CopyQueue.GetAddressOf()))),
+               "Create copy queue failed");
     }
 
     void QueryFeatures() {
-        D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
-        if (SUCCEEDED(m_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5)))) {
-            m_Features.rayTracing = options5.RaytracingTier != D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
+        D3D12_FEATURE_DATA_D3D12_OPTIONS5 o5{};
+        if (SUCCEEDED(m_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &o5, sizeof(o5)))) {
+            m_Features.rayTracing = o5.RaytracingTier != D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
         }
-
-        D3D12_FEATURE_DATA_D3D12_OPTIONS7 options7 = {};
-        if (SUCCEEDED(m_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &options7, sizeof(options7)))) {
-            m_Features.meshShaders = options7.MeshShaderTier != D3D12_MESH_SHADER_TIER_NOT_SUPPORTED;
+        D3D12_FEATURE_DATA_D3D12_OPTIONS7 o7{};
+        if (SUCCEEDED(m_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &o7, sizeof(o7)))) {
+            m_Features.meshShaders = o7.MeshShaderTier != D3D12_MESH_SHADER_TIER_NOT_SUPPORTED;
         }
-
-        D3D12_FEATURE_DATA_D3D12_OPTIONS6 options6 = {};
-        if (SUCCEEDED(m_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS6, &options6, sizeof(options6)))) {
-            m_Features.variableRateShading = options6.VariableShadingRateTier !=
-                                             D3D12_VARIABLE_SHADING_RATE_TIER_NOT_SUPPORTED;
+        D3D12_FEATURE_DATA_D3D12_OPTIONS6 o6{};
+        if (SUCCEEDED(m_Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS6, &o6, sizeof(o6)))) {
+            m_Features.variableRateShading = o6.VariableShadingRateTier != D3D12_VARIABLE_SHADING_RATE_TIER_NOT_SUPPORTED;
         }
-
         Logger::Info(LogGraphics, "GPU Features - RT: {}, Mesh Shaders: {}, VRS: {}",
                      m_Features.rayTracing, m_Features.meshShaders, m_Features.variableRateShading);
     }
 
 private:
-    ID3D12Device8 *m_Device = nullptr;
-    IDXGIFactory6 *m_Factory = nullptr;
-    IDXGIAdapter4 *m_Adapter = nullptr;
-    ID3D12CommandQueue *m_DirectQueue = nullptr;
-    ID3D12CommandQueue *m_ComputeQueue = nullptr;
-    ID3D12CommandQueue *m_CopyQueue = nullptr;
+    ComPtr<ID3D12Device8> m_Device{};
+    ComPtr<IDXGIFactory6> m_Factory{};
+    ComPtr<IDXGIAdapter4> m_Adapter{};
+    ComPtr<ID3D12CommandQueue> m_DirectQueue{};
+    ComPtr<ID3D12CommandQueue> m_ComputeQueue{};
+    ComPtr<ID3D12CommandQueue> m_CopyQueue{};
 
     struct {
-        bool rayTracing = false;
-        bool meshShaders = false;
-        bool variableRateShading = false;
+        bool rayTracing{false};
+        bool meshShaders{false};
+        bool variableRateShading{false};
     } m_Features;
 };
