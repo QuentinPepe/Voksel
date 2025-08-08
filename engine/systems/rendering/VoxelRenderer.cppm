@@ -41,20 +41,28 @@ static bool LoadImageRGBA(const std::filesystem::path& path, Vector<U32>& out, U
 }
 
 static void BlitWithPad(Vector<U32>& dst, U32 atlasW, U32 atlasH, U32 tx, U32 ty, U32 tile, U32 pad, const Vector<U32>& src) {
-    U32 ox = tx * (tile + 2 * pad);
-    U32 oy = ty * (tile + 2 * pad);
-    U32 sx = ox + pad;
-    U32 sy = oy + pad;
-    for (U32 y = 0; y < tile; ++y) for (U32 x = 0; x < tile; ++x) dst[(sy + y) * atlasW + (sx + x)] = src[y * tile + x];
-    for (U32 y = 0; y < atlasH; ++y) for (U32 x = ox; x < ox + (2 * pad + tile); ++x) {
-        U32 cx = std::clamp<int>(static_cast<int>(x), static_cast<int>(sx), static_cast<int>(sx + tile - 1));
-        dst[y * atlasW + x] = dst[sy * atlasW + cx];
-        dst[(atlasH - 1 - y) * atlasW + x] = dst[(sy + tile - 1) * atlasW + cx];
+    U32 ox{tx * (tile + 2 * pad)};
+    U32 oy{ty * (tile + 2 * pad)};
+    U32 sx{ox + pad};
+    U32 sy{oy + pad};
+
+    for (U32 y{0}; y < tile; ++y) for (U32 x{0}; x < tile; ++x)
+        dst[(sy + y) * atlasW + (sx + x)] = src[y * tile + x];
+
+    for (U32 x{ox}; x < ox + (2 * pad + tile); ++x) {
+        U32 cx{std::clamp<U32>(x, sx, sx + tile - 1)};
+        for (U32 y{0}; y < pad; ++y) {
+            dst[(sy - 1 - y) * atlasW + x] = dst[sy * atlasW + cx];
+            dst[(sy + tile + y) * atlasW + x] = dst[(sy + tile - 1) * atlasW + cx];
+        }
     }
-    for (U32 x = 0; x < atlasW; ++x) for (U32 y = oy; y < oy + (2 * pad + tile); ++y) {
-        U32 cy = std::clamp<int>(static_cast<int>(y), static_cast<int>(sy), static_cast<int>(sy + tile - 1));
-        dst[y * atlasW + x] = dst[cy * atlasW + sx];
-        dst[y * atlasW + (atlasW - 1 - x)] = dst[cy * atlasW + (sx + tile - 1)];
+
+    for (U32 y{oy}; y < oy + (2 * pad + tile); ++y) {
+        U32 cy{std::clamp<U32>(y, sy, sy + tile - 1)};
+        for (U32 x{0}; x < pad; ++x) {
+            dst[y * atlasW + (sx - 1 - x)] = dst[cy * atlasW + sx];
+            dst[y * atlasW + (sx + tile + x)] = dst[cy * atlasW + (sx + tile - 1)];
+        }
     }
 }
 
