@@ -26,7 +26,9 @@ export struct VoxelChunk {
     static constexpr U32 SizeX{32};
     static constexpr U32 SizeY{32};
     static constexpr U32 SizeZ{32};
-
+    U32 cx{0};
+    U32 cy{0};
+    U32 cz{0};
     Math::Vec3 origin{0.0f, 0.0f, 0.0f};
     Vector<Voxel> blocks{};
     bool dirty{true};
@@ -65,8 +67,8 @@ struct ComponentTypeID<VoxelRenderResources> {
 
 export inline USize VoxelIndex(U32 x, U32 y, U32 z) {
     return static_cast<USize>(x)
-         + static_cast<USize>(y) * VoxelChunk::SizeX
-         + static_cast<USize>(z) * VoxelChunk::SizeX * VoxelChunk::SizeY;
+        + static_cast<USize>(y) * VoxelChunk::SizeX
+        + static_cast<USize>(z) * VoxelChunk::SizeX * VoxelChunk::SizeY;
 }
 
 export inline bool InBounds(S32 x, S32 y, S32 z) {
@@ -78,9 +80,9 @@ export inline bool InBounds(S32 x, S32 y, S32 z) {
 
 export inline U32 PackRGBA8(U8 r, U8 g, U8 b, U8 a) {
     return static_cast<U32>(r)
-         | (static_cast<U32>(g) << 8)
-         | (static_cast<U32>(b) << 16)
-         | (static_cast<U32>(a) << 24);
+        | (static_cast<U32>(g) << 8)
+        | (static_cast<U32>(b) << 16)
+        | (static_cast<U32>(a) << 24);
 }
 
 export inline U32 ColorForVoxel(Voxel v) {
