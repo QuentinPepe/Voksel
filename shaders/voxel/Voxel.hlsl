@@ -48,6 +48,7 @@ float4 PSMain(VSOut i) : SV_Target {
                          ty * (tileSize + 2 * pad) + pad);
 
     float2 fuv = frac(i.uv);
+    if (abs(i.nrm.y) < 0.5) fuv.y = 1.0f - fuv.y;
     uint2 px = basePx + (uint2)floor(fuv * tileSize);
 
     return gAtlas.Load(int3(px, 0));

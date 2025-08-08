@@ -171,12 +171,19 @@ public:
                             if (d==1) nrm = c.back ? Math::Vec3{0,-1,0} : Math::Vec3{0,+1,0};
                             if (d==2) nrm = c.back ? Math::Vec3{0,0,-1} : Math::Vec3{0,0,+1};
 
-                            Math::Vec2 t0{0.0f, 0.0f};
-                            Math::Vec2 t1{0.0f, static_cast<F32>(h)};
-                            Math::Vec2 t2{static_cast<F32>(w), static_cast<F32>(h)};
-                            Math::Vec2 t3{static_cast<F32>(w), 0.0f};
-
                             bool cw{!c.back};
+                            Math::Vec2 t0{}, t1{}, t2{}, t3{};
+                            if (d == 0 || d == 1) {
+                                t0 = {0.0f, 0.0f};
+                                t1 = {static_cast<F32>(h), 0.0f};
+                                t2 = {static_cast<F32>(h), static_cast<F32>(w)};
+                                t3 = {0.0f, static_cast<F32>(w)};
+                            } else { // d == 2
+                                t0 = {0.0f, 0.0f};
+                                t1 = {0.0f, static_cast<F32>(h)};
+                                t2 = {static_cast<F32>(w), static_cast<F32>(h)};
+                                t3 = {static_cast<F32>(w), 0.0f};
+                            }
                             detail::AddFace(mesh->cpuVertices, p0,p1,p2,p3, nrm, t0,t1,t2,t3, c.tile, cw);
 
                             for (S32 y{}; y < h; ++y) for (S32 xw{}; xw < w; ++xw)
