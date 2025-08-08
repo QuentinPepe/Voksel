@@ -102,6 +102,7 @@ int main() {
     auto* cameraLifecycle    = scheduler->AddSystem<CameraLifecycleSystem>();
     auto* cameraController   = scheduler->AddSystem<CameraControllerSystem>();
     cameraController->SetInputManager(&inputManager);
+    cameraController->SetWindowInputHandler(&windowInput);
 
     auto* voxelBootstrap     = scheduler->AddSystem<VoxelBootstrapSystem>();
     auto* voxelMesher        = scheduler->AddSystem<VoxelMeshingSystem>();
@@ -160,9 +161,7 @@ int main() {
             if (stage == SystemStage::Render) {
                 for (auto* node : nodes) {
                     const std::string& sysName = node->metadata.name;
-
                     orchestrator.AddTaskDependency(P::Render, sysName, "BeginVoxelPass");
-
                     orchestrator.AddTaskDependency(P::Render, "EndVoxelPass", sysName);
                 }
             }
@@ -172,7 +171,7 @@ int main() {
     Logger::Info("Starting render loop – ESC quits");
 
     while (!graphics->ShouldClose() && !shouldExit) {
-
+        windowInput.Flush();
         orchestrator.ExecuteFrame();
     }
 

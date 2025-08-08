@@ -37,6 +37,6 @@ export {
     template<class T>
     using UniquePtr = std::unique_ptr<T>;
 
-    template<class K, class V>
-    using UnorderedMap = std::unordered_map<K, V>;
+    template<class K, class V, class H = std::hash<K>>
+    using UnorderedMap = std::unordered_map<K, V, H>;
 }
