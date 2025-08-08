@@ -2,6 +2,8 @@ module;
 #include <d3d12.h>
 #include <d3dx12.h>
 #include <wrl/client.h>
+#include <vector>
+#include <span>
 
 export module Graphics.DX12.CommandList;
 
@@ -19,6 +21,7 @@ private:
     ComPtr<ID3D12GraphicsCommandList6> m_CommandList;
     D3D12_COMMAND_LIST_TYPE m_Type;
     bool m_IsRecording = false;
+    std::vector<Microsoft::WRL::ComPtr<IUnknown>> m_KeepAlive;
 
 public:
     CommandList(Device& device, D3D12_COMMAND_LIST_TYPE type)
@@ -40,6 +43,8 @@ public:
     }
 
     void Begin() {
+        m_KeepAlive.clear();
+
         assert(!m_IsRecording, "Command list is already recording");
         assert(SUCCEEDED(m_Allocator->Reset()), "Failed to reset command allocator");
         assert(SUCCEEDED(m_CommandList->Reset(m_Allocator.Get(), nullptr)), "Failed to reset command list");
@@ -106,6 +111,11 @@ public:
     void SetDescriptorHeaps(U32 count, ID3D12DescriptorHeap* const* heaps) const {
         m_CommandList->SetDescriptorHeaps(count, heaps);
     }
+
+    template<typename T>
+    void KeepAlive(ComPtr<T> obj) { m_KeepAlive.emplace_back(obj); }
+
+    void ClearKeepAlive() { m_KeepAlive.clear(); }
 
     [[nodiscard]] ID3D12GraphicsCommandList6* GetCommandList() const { return m_CommandList.Get(); }
     [[nodiscard]] D3D12_COMMAND_LIST_TYPE GetType() const { return m_Type; }

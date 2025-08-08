@@ -2,6 +2,7 @@ export module Graphics.RenderData;
 
 import Core.Types;
 import Math.Matrix;
+import Math.Vector;
 
 export struct CameraConstants {
     Math::Mat4 view;
@@ -13,4 +14,13 @@ export struct CameraConstants {
 
 export struct ObjectConstants {
     Math::Mat4 world;
+};
+
+export struct AtlasConstants {
+    U32 tilesX;
+    U32 tileSize;
+    U32 pad;
+    U32 _pad0;
+    U32 atlasW;
+    U32 atlasH;
 };
