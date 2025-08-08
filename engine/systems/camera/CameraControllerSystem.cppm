@@ -105,7 +105,7 @@ private:
             controller->yaw = Math::Wrap(controller->yaw, -Math::PI, Math::PI);
         }
 
-        transform->rotation = Math::Quat::FromEuler(controller->pitch, controller->yaw, 0.0f);
+        transform->rotation = Math::Quat::YawPitchRoll(controller->yaw, controller->pitch, 0.0f);
 
         Math::Vec3 moveInput{};
 

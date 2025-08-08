@@ -32,6 +32,14 @@ export namespace Math {
             return Quat{v, std::cos(halfAngle)};
         }
 
+        [[nodiscard]] static Quat YawPitchRoll(float yaw, float pitch, float roll) {
+            using namespace Math;
+            return FromAxisAngle(Vec3::UnitY, yaw)   // yaw (Y, monde)
+                 * FromAxisAngle(Vec3::UnitX, pitch) // pitch (X, local)
+                 * FromAxisAngle(Vec3::UnitZ, roll); // roll (Z)
+        }
+
+
         [[nodiscard]] static Quat FromEuler(F32 pitch, F32 yaw, F32 roll) {
             // Convert to half angles
             F32 cy = std::cos(yaw * 0.5f);
