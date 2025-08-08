@@ -1,10 +1,13 @@
 export module Systems.VoxelMeshing;
 
+import ECS.Component;
 import ECS.SystemScheduler;
-import ECS.Query;
 import ECS.World;
 import Graphics;
 import Components.Voxel;
+import Components.VoxelStreaming;
+import Systems.CameraManager;
+import Components.Transform;
 import Core.Types;
 import Core.Assert;
 import Math.Vector;
@@ -33,10 +36,10 @@ namespace {
     constexpr U32 TILE_STONE{3u};
 
     constexpr MaterialDef kMatLUT[]{
-        {{0,0,0,0,0,0}}, // Air
-        {{TILE_DIRT,TILE_DIRT,TILE_DIRT,TILE_DIRT,TILE_DIRT,TILE_DIRT}}, // Dirt
-        {{TILE_GRASS_SIDE,TILE_GRASS_SIDE,TILE_DIRT,TILE_GRASS_TOP,TILE_GRASS_SIDE,TILE_GRASS_SIDE}}, // Grass
-        {{TILE_STONE,TILE_STONE,TILE_STONE,TILE_STONE,TILE_STONE,TILE_STONE}}, // Stone
+        {{0,0,0,0,0,0}},
+        {{TILE_DIRT,TILE_DIRT,TILE_DIRT,TILE_DIRT,TILE_DIRT,TILE_DIRT}},
+        {{TILE_GRASS_SIDE,TILE_GRASS_SIDE,TILE_DIRT,TILE_GRASS_TOP,TILE_GRASS_SIDE,TILE_GRASS_SIDE}},
+        {{TILE_STONE,TILE_STONE,TILE_STONE,TILE_STONE,TILE_STONE,TILE_STONE}},
     };
 
     inline U32 FaceOf(S32 axis, bool back) {
@@ -44,16 +47,23 @@ namespace {
         if (axis == 1) return back ? NY : PY;
         return back ? NZ : PZ;
     }
+
+    static inline U64 PackKey(S32 x, S32 y, S32 z) {
+        constexpr U64 B{1ull << 20};
+        return (static_cast<U64>(static_cast<S64>(x) + static_cast<S64>(B)))
+             | (static_cast<U64>(static_cast<S64>(y) + static_cast<S64>(B)) << 21)
+             | (static_cast<U64>(static_cast<S64>(z) + static_cast<S64>(B)) << 42);
+    }
 }
 
-export class VoxelMeshingSystem : public QuerySystem<VoxelMeshingSystem, Write<VoxelMesh>, Read<VoxelChunk>> {
+export class VoxelMeshingSystem : public System<VoxelMeshingSystem> {
 public:
     void Setup() {
-        QuerySystem::Setup();
         SetName("VoxelMeshing");
         SetStage(SystemStage::PreRender);
         SetPriority(SystemPriority::High);
         RunBefore("VoxelUpload");
+        SetParallel(false);
     }
 
     void Run(World* world, F32) override {
@@ -61,23 +71,58 @@ public:
         assert(cfgStore && cfgStore->Size() > 0, "Missing VoxelWorldConfig");
         VoxelWorldConfig const* cfg{}; for (auto [h,c] : *cfgStore) { cfg = &c; break; }
 
+        auto* scStore{world->GetStorage<VoxelStreamingConfig>()};
+        assert(scStore && scStore->Size() > 0, "Missing VoxelStreamingConfig");
+        VoxelStreamingConfig const* sc{}; for (auto [h,c] : *scStore) { sc = &c; break; }
+
+        auto* chunkStore{world->GetStorage<VoxelChunk>()};
+        if (!chunkStore) return;
+
+        const USize kCount{static_cast<USize>(VoxelChunk::SizeX) * VoxelChunk::SizeY * VoxelChunk::SizeZ};
+
         UnorderedMap<U64, VoxelChunk const*> chunkMap{};
-        if (auto* chunkStore{world->GetStorage<VoxelChunk>()}) {
-            for (auto [h,c] : *chunkStore) {
-                U64 k{PackKey(static_cast<S32>(c.cx), static_cast<S32>(c.cy), static_cast<S32>(c.cz))};
-                chunkMap.emplace(k, &c);
-            }
+        for (auto [h,c] : *chunkStore) {
+            if (c.blocks.size() != kCount) continue;
+            U64 k{PackKey(static_cast<S32>(c.cx), static_cast<S32>(c.cy), static_cast<S32>(c.cz))};
+            chunkMap.emplace(k, &c);
         }
 
-        ForEach(world, [cfg,&chunkMap](VoxelMesh* mesh, VoxelChunk const* chunk) {
-            if (!chunk->dirty) return;
+        Math::Vec3 camPos{};
+        if (auto h{CameraManager::GetPrimaryCamera()}; h.valid()) {
+            if (auto* t{world->GetComponent<Transform>(h)}) camPos = t->position;
+        }
+
+        const F32 sx{cfg->blockSize * static_cast<F32>(VoxelChunk::SizeX)};
+        const F32 sy{cfg->blockSize * static_cast<F32>(VoxelChunk::SizeY)};
+        const F32 sz{cfg->blockSize * static_cast<F32>(VoxelChunk::SizeZ)};
+
+        struct Item { F32 d2; EntityHandle h; };
+        Vector<Item> dirty{};
+        for (auto [h,c] : *chunkStore) {
+            if (!c.dirty) continue;
+            Math::Vec3 center{c.origin.x + 0.5f * sx, c.origin.y + 0.5f * sy, c.origin.z + 0.5f * sz};
+            dirty.push_back(Item{(center - camPos).LengthSquared(), h});
+        }
+        if (dirty.empty()) return;
+        std::sort(dirty.begin(), dirty.end(), [](Item const& a, Item const& b){ return a.d2 < b.d2; });
+
+        U32 left{sc->meshBudget};
+        for (auto const& it : dirty) {
+            if (left == 0u) break;
+            auto* mesh{world->GetComponent<VoxelMesh>(it.h)};
+            auto const* chunk{world->GetComponent<VoxelChunk>(it.h)};
+            if (!mesh || !chunk || !chunk->dirty) continue;
+            assert(chunk->blocks.size() == kCount, "Chunk must be generated");
+
             mesh->cpuVertices.clear();
-            mesh->cpuVertices.reserve(128u * 1024u);
 
             const F32 s{cfg->blockSize};
             const S32 NX{static_cast<S32>(VoxelChunk::SizeX)};
             const S32 NY{static_cast<S32>(VoxelChunk::SizeY)};
             const S32 NZ{static_cast<S32>(VoxelChunk::SizeZ)};
+
+            U32 reserveCount{12u * static_cast<U32>(NX*NY + NY*NZ + NX*NZ)};
+            mesh->cpuVertices.reserve(reserveCount);
 
             auto sample = [&](S32 lx, S32 ly, S32 lz) -> Voxel {
                 S32 ocx{}, ocy{}, ocz{};
@@ -90,9 +135,9 @@ public:
                 S32 ncx{static_cast<S32>(chunk->cx) + ocx};
                 S32 ncy{static_cast<S32>(chunk->cy) + ocy};
                 S32 ncz{static_cast<S32>(chunk->cz) + ocz};
-                auto it{chunkMap.find(PackKey(ncx,ncy,ncz))};
-                if (it == chunkMap.end()) return Voxel::Air;
-                auto* ch{it->second};
+                auto it2{chunkMap.find(PackKey(ncx,ncy,ncz))};
+                if (it2 == chunkMap.end()) return Voxel::Air;
+                auto* ch{it2->second};
                 return ch->blocks[VoxelIndex(static_cast<U32>(lx), static_cast<U32>(ly), static_cast<U32>(lz))];
             };
 
@@ -178,7 +223,7 @@ public:
                                 t1 = {static_cast<F32>(h), 0.0f};
                                 t2 = {static_cast<F32>(h), static_cast<F32>(w)};
                                 t3 = {0.0f, static_cast<F32>(w)};
-                            } else { // d == 2
+                            } else {
                                 t0 = {0.0f, 0.0f};
                                 t1 = {0.0f, static_cast<F32>(h)};
                                 t2 = {static_cast<F32>(w), static_cast<F32>(h)};
@@ -200,14 +245,7 @@ public:
             mesh->vertexCount = static_cast<U32>(mesh->cpuVertices.size());
             mesh->gpuDirty = true;
             const_cast<VoxelChunk*>(chunk)->dirty = false;
-        });
-    }
-
-private:
-    static inline U64 PackKey(S32 x, S32 y, S32 z) {
-        constexpr U64 B{1ull << 20};
-        return (static_cast<U64>(static_cast<S64>(x) + static_cast<S64>(B)))
-             | (static_cast<U64>(static_cast<S64>(y) + static_cast<S64>(B)) << 21)
-             | (static_cast<U64>(static_cast<S64>(z) + static_cast<S64>(B)) << 42);
+            --left;
+        }
     }
 };
