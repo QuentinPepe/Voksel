@@ -59,8 +59,10 @@ public:
         Logger::Info(LogGraphics, "Renderer initialized");
     }
 
+    ~Renderer() { WaitIdle(); }
+
     void BeginFrame() {
-        auto &frameData = m_FrameData[m_CurrentFrame];
+        auto& frameData = m_FrameData[m_CurrentFrame];
         frameData.fence->WaitCPU(frameData.fenceValue);
         frameData.commandList->Begin();
         m_CbvSrvUavHeap->Reset();
@@ -88,8 +90,18 @@ public:
         CreateRenderTargets();
     }
 
-    void ResetRenderGraph() {
+    void ResetRenderGraph() const {
         ClearRenderGraph();
+    }
+
+    void WaitIdle() {
+        for (auto& f : m_FrameData) {
+            if (f.fenceValue != 0) { f.fence->WaitCPU(f.fenceValue); }
+        }
+        auto* q{m_Device.GetDirectQueue()};
+        if (!q) { return; }
+        U64 v{m_FrameData[m_CurrentFrame].fence->Signal(q)};
+        m_FrameData[m_CurrentFrame].fence->WaitCPU(v);
     }
 
     [[nodiscard]] Device &GetDevice() { return m_Device; }

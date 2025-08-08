@@ -118,10 +118,9 @@ int main() {
         orchestratorECS.UpdateECS(static_cast<F32>(frame.deltaTime));
     });
 
-    bool shouldExit = false;
     orchestrator.SetUserInputCallback([&](EngineOrchestrator::FrameData&) {
         if (inputManager.IsKeyJustPressed(Key::Escape)) {
-            shouldExit = true;
+            window.RequestClose();
         }
     });
 
@@ -170,7 +169,7 @@ int main() {
 
     Logger::Info("Starting render loop – ESC quits");
 
-    while (!graphics->ShouldClose() && !shouldExit) {
+    while (!graphics->ShouldClose()) {
         windowInput.Flush();
         orchestrator.ExecuteFrame();
     }

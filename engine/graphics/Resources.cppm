@@ -72,6 +72,13 @@ public:
     Resource(ComPtr<ID3D12Resource> resource, D3D12_RESOURCE_STATES initialState, ResourceType type)
         : m_Resource{std::move(resource)}, m_CurrentState{initialState}, m_Type{type} {}
 
+    Resource(ID3D12Resource* resource, D3D12_RESOURCE_STATES initialState, ResourceType type)
+        : m_CurrentState{initialState}, m_Type{type} {
+        assert(resource != nullptr, "null resource");
+        resource->AddRef();
+        m_Resource.Attach(resource);
+    }
+
     [[nodiscard]] ID3D12Resource* GetResource() const { return m_Resource.Get(); }
     [[nodiscard]] D3D12_RESOURCE_STATES GetCurrentState() const { return m_CurrentState; }
     [[nodiscard]] ResourceType GetType() const { return m_Type; }
@@ -92,10 +99,9 @@ private:
 
 public:
     Buffer(Device& device, const BufferDesc& desc)
-        : Resource{nullptr, D3D12_RESOURCE_STATE_COMMON, ResourceType::Buffer}, m_Desc{desc} {
-
-        D3D12_HEAP_PROPERTIES heapProps = {};
-        D3D12_RESOURCE_DESC resourceDesc = {};
+        : Resource{ComPtr<ID3D12Resource>{}, D3D12_RESOURCE_STATE_COMMON, ResourceType::Buffer}, m_Desc{desc} {
+        D3D12_HEAP_PROPERTIES heapProps{};
+        D3D12_RESOURCE_DESC resourceDesc{};
 
         if (desc.cpuAccessible) {
             heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -160,12 +166,11 @@ private:
 
 public:
     Texture(Device& device, const TextureDesc& desc)
-        : Resource{nullptr, D3D12_RESOURCE_STATE_COMMON, GetResourceType(desc.dimension)}, m_Desc{desc} {
-
-        D3D12_HEAP_PROPERTIES heapProps = {};
+        : Resource{ComPtr<ID3D12Resource>{}, D3D12_RESOURCE_STATE_COMMON, GetResourceType(desc.dimension)}, m_Desc{desc} {
+        D3D12_HEAP_PROPERTIES heapProps{};
         heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
 
-        D3D12_RESOURCE_DESC resourceDesc = {};
+        D3D12_RESOURCE_DESC resourceDesc{};
         resourceDesc.Dimension = desc.dimension;
         resourceDesc.Width = desc.width;
         resourceDesc.Height = desc.height;
@@ -178,7 +183,7 @@ public:
         resourceDesc.Flags = GetResourceFlags(desc.usage);
 
         D3D12_CLEAR_VALUE* clearValue = nullptr;
-        D3D12_CLEAR_VALUE optimizedClear = {};
+        D3D12_CLEAR_VALUE optimizedClear{};
 
         if (static_cast<U32>(desc.usage & ResourceUsage::RenderTarget)) {
             m_CurrentState = D3D12_RESOURCE_STATE_RENDER_TARGET;

@@ -39,10 +39,17 @@ public:
     }
 
     void WaitCPU(U64 value) const {
-        if (m_Fence->GetCompletedValue() < value) {
-            assert(SUCCEEDED(m_Fence->SetEventOnCompletion(value, m_Event)), "Failed to set fence event");
-            WaitForSingleObject(m_Event, INFINITE);
+        if (m_Fence->GetCompletedValue() >= value) { return; }
+        const HRESULT hr{m_Fence->SetEventOnCompletion(value, m_Event)};
+        if (FAILED(hr) || !m_Event) {
+            // Fallback if device is removed during shutdown
+            for (;;) {
+                if (m_Fence->GetCompletedValue() >= value) { break; }
+                ::Sleep(0);
+            }
+            return;
         }
+        WaitForSingleObject(m_Event, INFINITE);
     }
 
     void WaitGPU(ID3D12CommandQueue* queue, U64 value) const {

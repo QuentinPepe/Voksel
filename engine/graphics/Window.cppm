@@ -47,6 +47,11 @@ public:
         }
     }
 
+    void RequestClose() const {
+        assert(m_Window, "Window must exist");
+        glfwSetWindowShouldClose(m_Window, GLFW_TRUE);
+    }
+
     ~Window() {
         if (m_Window) {
             glfwDestroyWindow(m_Window);
