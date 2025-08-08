@@ -130,6 +130,9 @@ int main() {
 
     orchestratorECS.BuildECSExecutionGraph(&world);
 
+    orchestrator.SetProfilingEnabled(true);
+    TaskProfiler::Get().SetEnabled(true);
+
     orchestrator.SetPreFrameCallback([&](EngineOrchestrator::FrameData &frame) {
         orchestratorECS.UpdateECS(static_cast<F32>(frame.deltaTime));
     });
@@ -142,7 +145,7 @@ int main() {
         if (inputManager.IsKeyJustPressed(Key::F2)) {
             auto report = TaskProfiler::Get().GenerateReport();
             if (!report.empty()) {
-                TaskProfiler::Get().SaveToFile("profiler_data.txt");
+                TaskProfiler::Get().SaveToFile("output/profiler_data.txt");
                 Logger::Info("Profiler data saved");
             }
         }
@@ -204,7 +207,7 @@ int main() {
 
     auto report = TaskProfiler::Get().GenerateReport();
     if (!report.empty()) {
-        TaskProfiler::Get().SaveToFile("profiler_data.txt");
+        TaskProfiler::Get().SaveToFile("output/final_profiler_data.txt");
         Logger::Info("Profiler data saved");
     }
 

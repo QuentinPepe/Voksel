@@ -21,14 +21,17 @@ public:
         SetParallel(false);
     }
 
-    void SetGraphicsContext(IGraphicsContext* gfx) { m_Gfx = gfx; }
+    void SetGraphicsContext(IGraphicsContext* gfx) {
+        m_Gfx = gfx;
+    }
 
     void Run(World* world, F32) override {
         assert(m_Gfx != nullptr, "GraphicsContext must be set");
 
         auto* scStore{world->GetStorage<VoxelStreamingConfig>()};
         assert(scStore && scStore->Size() > 0, "Missing VoxelStreamingConfig");
-        VoxelStreamingConfig const* sc{}; for (auto [h,c] : *scStore) { sc = &c; break; }
+        VoxelStreamingConfig const* sc{};
+        for (auto [h,c] : *scStore) { sc = &c; break; }
 
         auto* storage{world->GetStorage<VoxelMesh>()};
         if (!storage) return;
@@ -37,10 +40,24 @@ public:
         for (auto [handle, mesh] : *storage) {
             if (!mesh.gpuDirty) continue;
             if (left == 0u) break;
+
+            // Swap ready vertices to CPU buffer
+            if (!mesh.readyVertices.empty()) {
+                mesh.cpuVertices.swap(mesh.readyVertices);
+                mesh.readyVertices.clear();
+            }
+
+            // Upload to GPU
             const U64 vsize{static_cast<U64>(mesh.cpuVertices.size() * sizeof(Vertex))};
             const U64 isize{static_cast<U64>(mesh.cpuIndices.size() * sizeof(U32))};
-            if (vsize) { mesh.vertexBuffer = m_Gfx->CreateVertexBuffer(mesh.cpuVertices.data(), vsize); }
-            if (isize) { mesh.indexBuffer = m_Gfx->CreateIndexBuffer(mesh.cpuIndices.data(), isize); }
+
+            if (vsize) {
+                mesh.vertexBuffer = m_Gfx->CreateVertexBuffer(mesh.cpuVertices.data(), vsize);
+            }
+            if (isize) {
+                mesh.indexBuffer = m_Gfx->CreateIndexBuffer(mesh.cpuIndices.data(), isize);
+            }
+
             mesh.gpuDirty = false;
             --left;
         }

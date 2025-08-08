@@ -99,10 +99,11 @@ public:
         struct Item { F32 d2; EntityHandle h; };
         Vector<Item> dirty{};
         for (auto [h,c] : *chunkStore) {
-            if (!c.dirty) continue;
+            if (!c.dirty || c.generating || c.blocks.size() != kCount) continue;
             Math::Vec3 center{c.origin.x + 0.5f * sx, c.origin.y + 0.5f * sy, c.origin.z + 0.5f * sz};
-            dirty.push_back(Item{(center - camPos).LengthSquared(), h});
+            dirty.push_back({(center - camPos).LengthSquared(), h});
         }
+
         if (dirty.empty()) return;
         std::sort(dirty.begin(), dirty.end(), [](Item const& a, Item const& b){ return a.d2 < b.d2; });
 

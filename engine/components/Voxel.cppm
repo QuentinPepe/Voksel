@@ -32,6 +32,7 @@ export struct VoxelChunk {
     Math::Vec3 origin{0.0f, 0.0f, 0.0f};
     Vector<Voxel> blocks{};
     bool dirty{true};
+    bool generating{false};
 };
 
 export struct VoxelMesh {
@@ -42,8 +43,9 @@ export struct VoxelMesh {
     U32 vertexCount{0};
     U32 indexCount{0};
     bool gpuDirty{false};
+    bool meshing{false};
+    Vector<Vertex> readyVertices{};
 };
-
 
 export struct VoxelRenderResources {
     U32 pipeline{INVALID_INDEX};
@@ -91,9 +93,9 @@ export inline U32 PackRGBA8(U8 r, U8 g, U8 b, U8 a) {
 
 export inline U32 ColorForVoxel(Voxel v) {
     switch (v) {
-        case Voxel::Dirt:  return PackRGBA8(134, 96,  67,  255);
-        case Voxel::Grass: return PackRGBA8(95,  159, 53,  255);
-        case Voxel::Stone: return PackRGBA8(130, 130, 130, 255);
-        default:           return PackRGBA8(0,   0,   0,   0);
+    case Voxel::Dirt:  return PackRGBA8(134, 96,  67,  255);
+    case Voxel::Grass: return PackRGBA8(95,  159, 53,  255);
+    case Voxel::Stone: return PackRGBA8(130, 130, 130, 255);
+    default:           return PackRGBA8(0,   0,   0,   0);
     }
 }
