@@ -59,13 +59,13 @@ private:
         m_InputContext = mapper.CreateContext("CameraControl", 100);
 
         auto* moveForward = m_InputContext->AddAction("CameraMoveForward");
-        moveForward->AddBinding(InputBinding::MakeKey(Key::Z));
+        moveForward->AddBinding(InputBinding::MakeKey(Key::W));
 
         auto* moveBackward = m_InputContext->AddAction("CameraMoveBackward");
         moveBackward->AddBinding(InputBinding::MakeKey(Key::S));
 
         auto* moveLeft = m_InputContext->AddAction("CameraMoveLeft");
-        moveLeft->AddBinding(InputBinding::MakeKey(Key::Q));
+        moveLeft->AddBinding(InputBinding::MakeKey(Key::A));
 
         auto* moveRight = m_InputContext->AddAction("CameraMoveRight");
         moveRight->AddBinding(InputBinding::MakeKey(Key::D));
@@ -74,7 +74,7 @@ private:
         moveUp->AddBinding(InputBinding::MakeKey(Key::E));
 
         auto* moveDown = m_InputContext->AddAction("CameraMoveDown");
-        moveDown->AddBinding(InputBinding::MakeKey(Key::A));
+        moveDown->AddBinding(InputBinding::MakeKey(Key::Q));
 
         auto* boost = m_InputContext->AddAction("CameraBoost");
         boost->AddBinding(InputBinding::MakeKey(Key::LeftShift));

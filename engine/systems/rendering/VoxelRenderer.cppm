@@ -4,15 +4,21 @@ import ECS.SystemScheduler;
 import ECS.Query;
 import ECS.World;
 import Components.Voxel;
+import Components.Camera;
+import Components.Transform;
+import Systems.CameraManager;
 import Graphics;
 import Graphics.RenderData;
 import Core.Types;
 import Core.Assert;
+import Math.Matrix;
 import std;
 
 export class VoxelRendererSystem : public System<VoxelRendererSystem> {
 private:
     IGraphicsContext* m_Gfx{nullptr};
+    U32 m_CameraCB{INVALID_INDEX};
+    U32 m_ObjectCB{INVALID_INDEX};
 
 public:
     void Setup() {
@@ -41,7 +47,7 @@ public:
         return m_Gfx->CreateGraphicsPipeline(pi);
     }
 
-    void Run(World* world, F32 /*dt*/) override {
+    void Run(World* world, F32) override {
         assert(m_Gfx != nullptr, "GraphicsContext must be set");
 
         auto* rr{world->GetStorage<VoxelRenderResources>()};
@@ -52,14 +58,35 @@ public:
             rr = world->GetStorage<VoxelRenderResources>();
         }
 
-        const VoxelRenderResources* res{};
-        for (auto [h, r] : *rr) { res = &r; break; }
+        const VoxelRenderResources* res{}; for (auto [h, r] : *rr) { res = &r; break; }
         assert(res != nullptr && res->pipeline != INVALID_INDEX, "Invalid render resources");
+
+        if (m_CameraCB == INVALID_INDEX) m_CameraCB = m_Gfx->CreateConstantBuffer(sizeof(CameraConstants));
+        if (m_ObjectCB  == INVALID_INDEX) m_ObjectCB  = m_Gfx->CreateConstantBuffer(sizeof(ObjectConstants));
+
+        CameraConstants cam{};
+        if (auto h = CameraManager::GetPrimaryCamera(); h.valid()) {
+            if (auto* camCmp = world->GetComponent<Camera>(h)) {
+                cam.view           = camCmp->view;
+                cam.projection     = camCmp->projection;
+                cam.viewProjection = camCmp->viewProjection;
+            }
+            if (auto* tr = world->GetComponent<Transform>(h)) {
+                cam.cameraPosition = tr->position;
+            }
+        }
+        m_Gfx->UpdateConstantBuffer(m_CameraCB, &cam, sizeof(cam));
+
+        ObjectConstants obj{};
+        obj.world = Math::Mat4::Identity;
+        m_Gfx->UpdateConstantBuffer(m_ObjectCB, &obj, sizeof(obj));
 
         auto* storage{world->GetStorage<VoxelMesh>()};
         if (!storage) { return; }
 
         m_Gfx->SetPipeline(res->pipeline);
+        m_Gfx->SetConstantBuffer(m_CameraCB, 0);
+        m_Gfx->SetConstantBuffer(m_ObjectCB,  1);
 
         for (auto [handle, mesh] : *storage) {
             if (mesh.vertexBuffer == INVALID_INDEX || mesh.vertexCount == 0) { continue; }

@@ -20,17 +20,14 @@ public:
         SetPriority(SystemPriority::High);
     }
 
-    void Run(World* world, F32 dt) override {
+    void Run(World* world, F32) override {
         ForEach(world, [](Camera* camera, const Transform* transform) {
             camera->view = Math::Mat4::LookAt(
                 transform->position,
                 transform->position + transform->Forward(),
                 transform->Up()
             );
-
-            if (camera->needsUpdate) {
-                camera->UpdateViewProjection();
-            }
+            camera->UpdateViewProjection();
         });
     }
 };
