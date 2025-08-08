@@ -23,7 +23,7 @@ public:
 
     void SetGraphicsContext(IGraphicsContext* gfx) { m_Gfx = gfx; }
 
-    void Run(World* world, F32 /*dt*/) override {
+    void Run(World* world, F32) override {
         assert(m_Gfx != nullptr, "GraphicsContext must be set");
 
         auto* storage{world->GetStorage<VoxelMesh>()};
@@ -31,12 +31,10 @@ public:
 
         for (auto [handle, mesh] : *storage) {
             if (!mesh.gpuDirty) { continue; }
-            const U64 sizeBytes{static_cast<U64>(mesh.cpuVertices.size() * sizeof(Vertex))};
-            if (mesh.vertexBuffer == INVALID_INDEX) {
-                mesh.vertexBuffer = m_Gfx->CreateVertexBuffer(mesh.cpuVertices.data(), sizeBytes);
-            } else {
-                mesh.vertexBuffer = m_Gfx->CreateVertexBuffer(mesh.cpuVertices.data(), sizeBytes);
-            }
+            const U64 vsize{static_cast<U64>(mesh.cpuVertices.size() * sizeof(Vertex))};
+            const U64 isize{static_cast<U64>(mesh.cpuIndices.size() * sizeof(U32))};
+            if (vsize) { mesh.vertexBuffer = m_Gfx->CreateVertexBuffer(mesh.cpuVertices.data(), vsize); }
+            if (isize) { mesh.indexBuffer = m_Gfx->CreateIndexBuffer(mesh.cpuIndices.data(), isize); }
             mesh.gpuDirty = false;
         }
     }

@@ -36,10 +36,14 @@ export struct VoxelChunk {
 
 export struct VoxelMesh {
     Vector<Vertex> cpuVertices{};
+    Vector<U32> cpuIndices{};
     U32 vertexBuffer{INVALID_INDEX};
+    U32 indexBuffer{INVALID_INDEX};
     U32 vertexCount{0};
+    U32 indexCount{0};
     bool gpuDirty{false};
 };
+
 
 export struct VoxelRenderResources {
     U32 pipeline{INVALID_INDEX};

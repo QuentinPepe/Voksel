@@ -30,19 +30,20 @@ using Microsoft::WRL::ComPtr;
 
 struct ResourceHandle {
     enum Type { VertexBuffer, IndexBuffer, Pipeline } type;
+
     U32 index;
 };
 
 class DX12GraphicsContext : public IGraphicsContext {
 private:
     std::unique_ptr<Renderer> m_Renderer;
-    Window* m_Window;
+    Window *m_Window;
     std::unique_ptr<ShaderManager> m_ShaderManager;
-    std::vector<std::unique_ptr<Buffer>> m_VertexBuffers;
-    std::vector<std::unique_ptr<Buffer>> m_IndexBuffers;
-    std::vector<std::unique_ptr<Buffer>> m_ConstantBuffers;
-    std::vector<std::unique_ptr<GraphicsPipeline>> m_Pipelines;
-    std::vector<std::unique_ptr<RootSignature>> m_RootSignatures;
+    std::vector<std::unique_ptr<Buffer> > m_VertexBuffers;
+    std::vector<std::unique_ptr<Buffer> > m_IndexBuffers;
+    std::vector<std::unique_ptr<Buffer> > m_ConstantBuffers;
+    std::vector<std::unique_ptr<GraphicsPipeline> > m_Pipelines;
+    std::vector<std::unique_ptr<RootSignature> > m_RootSignatures;
 
     struct TextureEntry {
         std::unique_ptr<Texture> tex;
@@ -58,14 +59,14 @@ private:
     bool m_InRenderPass = false;
 
     struct FramePassData {
-        std::vector<std::function<void(ID3D12GraphicsCommandList*)>> commands;
+        std::vector<std::function<void(ID3D12GraphicsCommandList *)> > commands;
         RenderPassInfo passInfo;
     };
 
     std::unique_ptr<FramePassData> m_CurrentPassData;
 
 public:
-    DX12GraphicsContext(Window& window, const GraphicsConfig& config) : m_Window{&window} {
+    DX12GraphicsContext(Window &window, const GraphicsConfig &config) : m_Window{&window} {
         RendererConfig rendererConfig{};
         rendererConfig.deviceConfig.enableDebugLayer = config.enableValidation;
         rendererConfig.swapChainConfig.bufferCount = config.frameBufferCount;
@@ -86,26 +87,128 @@ public:
         m_ShaderManager.reset();
     }
 
-    U32 CreateVertexBuffer(const void* data, U64 size) override {
+    U32 CreateVertexBuffer(const void *data, U64 size) override {
         BufferDesc desc{};
         desc.size = size;
-        desc.usage = ResourceUsage::VertexBuffer;
-        desc.cpuAccessible = true;
-        auto buffer = std::make_unique<Buffer>(m_Renderer->GetDevice(), desc);
-        buffer->UpdateData(data, size);
-        U32 handle = static_cast<U32>(m_VertexBuffers.size());
+        desc.usage = ResourceUsage::VertexBuffer | ResourceUsage::CopyDest;
+        desc.cpuAccessible = false;
+        auto buffer{std::make_unique<Buffer>(m_Renderer->GetDevice(), desc)};
+
+        if (data && size) {
+            D3D12_HEAP_PROPERTIES heapProps{};
+            heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+            D3D12_RESOURCE_DESC rd{};
+            rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+            rd.Width = size;
+            rd.Height = 1;
+            rd.DepthOrArraySize = 1;
+            rd.MipLevels = 1;
+            rd.Format = DXGI_FORMAT_UNKNOWN;
+            rd.SampleDesc = {1, 0};
+            rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+            rd.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+            ComPtr<ID3D12Resource> upload{};
+            assert(SUCCEEDED(m_Renderer->GetDevice().GetDevice()->CreateCommittedResource(
+                &heapProps, D3D12_HEAP_FLAG_NONE, &rd,
+                D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upload))), "Failed to create upload buffer");
+
+            void *mapped{};
+            D3D12_RANGE range{0, 0};
+            assert(SUCCEEDED(upload->Map(0, &range, &mapped)), "Map failed");
+            std::memcpy(mapped, data, static_cast<size_t>(size));
+            upload->Unmap(0, nullptr);
+
+            auto *cmd{m_Renderer->GetCurrentCommandList().GetCommandList()};
+
+            D3D12_RESOURCE_BARRIER b0{};
+            b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b0.Transition.pResource = buffer->GetResource();
+            b0.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b0.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+            b0.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+            cmd->ResourceBarrier(1, &b0);
+            buffer->SetCurrentState(D3D12_RESOURCE_STATE_COPY_DEST);
+
+            cmd->CopyBufferRegion(buffer->GetResource(), 0, upload.Get(), 0, size);
+
+            D3D12_RESOURCE_BARRIER b1{};
+            b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b1.Transition.pResource = buffer->GetResource();
+            b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+            b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+            cmd->ResourceBarrier(1, &b1);
+            buffer->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+
+            m_Renderer->GetCurrentCommandList().KeepAlive(upload);
+        }
+
+        U32 handle{static_cast<U32>(m_VertexBuffers.size())};
         m_VertexBuffers.push_back(std::move(buffer));
         return handle;
     }
 
-    U32 CreateIndexBuffer(const void* data, U64 size) override {
+    U32 CreateIndexBuffer(const void *data, U64 size) override {
         BufferDesc desc{};
         desc.size = size;
-        desc.usage = ResourceUsage::IndexBuffer;
-        desc.cpuAccessible = true;
-        auto buffer = std::make_unique<Buffer>(m_Renderer->GetDevice(), desc);
-        buffer->UpdateData(data, size);
-        U32 handle = static_cast<U32>(m_IndexBuffers.size());
+        desc.usage = ResourceUsage::IndexBuffer | ResourceUsage::CopyDest;
+        desc.cpuAccessible = false;
+        auto buffer{std::make_unique<Buffer>(m_Renderer->GetDevice(), desc)};
+
+        if (data && size) {
+            D3D12_HEAP_PROPERTIES heapProps{};
+            heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+            D3D12_RESOURCE_DESC rd{};
+            rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+            rd.Width = size;
+            rd.Height = 1;
+            rd.DepthOrArraySize = 1;
+            rd.MipLevels = 1;
+            rd.Format = DXGI_FORMAT_UNKNOWN;
+            rd.SampleDesc = {1, 0};
+            rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+            rd.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+            ComPtr<ID3D12Resource> upload{};
+            assert(SUCCEEDED(m_Renderer->GetDevice().GetDevice()->CreateCommittedResource(
+                &heapProps, D3D12_HEAP_FLAG_NONE, &rd,
+                D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upload))), "Failed to create upload buffer");
+
+            void *mapped{};
+            D3D12_RANGE range{0, 0};
+            assert(SUCCEEDED(upload->Map(0, &range, &mapped)), "Map failed");
+            std::memcpy(mapped, data, static_cast<size_t>(size));
+            upload->Unmap(0, nullptr);
+
+            auto *cmd{m_Renderer->GetCurrentCommandList().GetCommandList()};
+
+            D3D12_RESOURCE_BARRIER b0{};
+            b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b0.Transition.pResource = buffer->GetResource();
+            b0.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b0.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+            b0.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+            cmd->ResourceBarrier(1, &b0);
+            buffer->SetCurrentState(D3D12_RESOURCE_STATE_COPY_DEST);
+
+            cmd->CopyBufferRegion(buffer->GetResource(), 0, upload.Get(), 0, size);
+
+            D3D12_RESOURCE_BARRIER b1{};
+            b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b1.Transition.pResource = buffer->GetResource();
+            b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+            b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+            cmd->ResourceBarrier(1, &b1);
+            buffer->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+
+            m_Renderer->GetCurrentCommandList().KeepAlive(upload);
+        }
+
+        U32 handle{static_cast<U32>(m_IndexBuffers.size())};
         m_IndexBuffers.push_back(std::move(buffer));
         return handle;
     }
@@ -122,12 +225,12 @@ public:
         return handle;
     }
 
-    void UpdateConstantBuffer(U32 buffer, const void* data, U64 size) override {
+    void UpdateConstantBuffer(U32 buffer, const void *data, U64 size) override {
         if (buffer >= m_ConstantBuffers.size()) return;
         m_ConstantBuffers[buffer]->UpdateData(data, size);
     }
 
-    U32 CreateGraphicsPipeline(const GraphicsPipelineCreateInfo& info) override {
+    U32 CreateGraphicsPipeline(const GraphicsPipelineCreateInfo &info) override {
         std::vector<D3D12_ROOT_PARAMETER> rootParams{};
         D3D12_ROOT_PARAMETER p0{};
         p0.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
@@ -183,7 +286,7 @@ public:
                    | D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
         auto rootSig = std::make_unique<RootSignature>(m_Renderer->GetDevice(), rs);
         GraphicsPipelineDesc pd{};
-        for (auto const& sh : info.shaders) {
+        for (auto const &sh: info.shaders) {
             std::string target{};
             if (sh.stage == ShaderStage::Vertex) target = "vs_5_0";
             else if (sh.stage == ShaderStage::Pixel) target = "ps_5_0";
@@ -196,7 +299,7 @@ public:
             if (sh.stage == ShaderStage::Pixel) pd.pixelShader = bc;
         }
         std::vector<D3D12_INPUT_ELEMENT_DESC> layout{};
-        for (auto const& [name, off] : info.vertexAttributes) {
+        for (auto const &[name, off]: info.vertexAttributes) {
             DXGI_FORMAT fmt{DXGI_FORMAT_R32G32B32_FLOAT};
             if (name == "NORMAL") fmt = DXGI_FORMAT_R32G32B32_FLOAT;
             else if (name == "TEXCOORD") fmt = DXGI_FORMAT_R32G32_FLOAT;
@@ -233,7 +336,7 @@ public:
         m_CurrentPassData.reset();
     }
 
-    void BeginRenderPass(const RenderPassInfo& info) override {
+    void BeginRenderPass(const RenderPassInfo &info) override {
         assert(!m_InRenderPass, "Already in render pass");
         m_InRenderPass = true;
         m_CurrentPassData->passInfo = info;
@@ -246,8 +349,9 @@ public:
         m_CurrentPassData = std::make_unique<FramePassData>();
         m_Renderer->GetRenderGraph().AddPass<FramePassData>(
             passData->passInfo.name,
-            [](RenderGraphBuilder&, FramePassData&) {},
-            [this, passData](const RenderGraphResources&, CommandList& cmdList, const FramePassData&) {
+            [](RenderGraphBuilder &, FramePassData &) {
+            },
+            [this, passData](const RenderGraphResources &, CommandList &cmdList, const FramePassData &) {
                 ExecuteRenderPass(cmdList, *passData);
             }
         );
@@ -270,7 +374,7 @@ public:
         const U32 pso = m_CurrentPipeline;
         const U32 vb = m_CurrentVertexBuffer;
         const U32 ib = m_CurrentIndexBuffer;
-        m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList* cmd) {
+        m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
             if (pso != INVALID_INDEX) {
                 m_Pipelines[pso]->Bind(cmd);
                 cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -278,14 +382,14 @@ public:
             if (vb != INVALID_INDEX) {
                 D3D12_VERTEX_BUFFER_VIEW vbView{};
                 vbView.BufferLocation = m_VertexBuffers[vb]->GetGPUAddress();
-                vbView.SizeInBytes = (UINT)m_VertexBuffers[vb]->GetDesc().size;
+                vbView.SizeInBytes = (UINT) m_VertexBuffers[vb]->GetDesc().size;
                 vbView.StrideInBytes = sizeof(Vertex);
                 cmd->IASetVertexBuffers(0, 1, &vbView);
             }
             if (ib != INVALID_INDEX) {
                 D3D12_INDEX_BUFFER_VIEW ibView{};
                 ibView.BufferLocation = m_IndexBuffers[ib]->GetGPUAddress();
-                ibView.SizeInBytes = (UINT)m_IndexBuffers[ib]->GetDesc().size;
+                ibView.SizeInBytes = (UINT) m_IndexBuffers[ib]->GetDesc().size;
                 ibView.Format = DXGI_FORMAT_R32_UINT;
                 cmd->IASetIndexBuffer(&ibView);
             }
@@ -295,7 +399,7 @@ public:
 
     void DrawIndexed(U32 indexCount, U32 instanceCount, U32 firstIndex, S32 vertexOffset, U32 firstInstance) override {
         assert(m_InRenderPass, "Must be in render pass");
-        m_CurrentPassData->commands.push_back([=](ID3D12GraphicsCommandList* cmd) {
+        m_CurrentPassData->commands.push_back([=](ID3D12GraphicsCommandList *cmd) {
             cmd->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
         });
     }
@@ -309,9 +413,9 @@ public:
         return m_Window->ShouldClose();
     }
 
-    ShaderManager* GetShaderManager() { return m_ShaderManager.get(); }
+    ShaderManager *GetShaderManager() { return m_ShaderManager.get(); }
 
-    U32 CreateTexture2D(const void* rgba8, U32 width, U32 height, U32 mipLevels = 1) override {
+    U32 CreateTexture2D(const void *rgba8, U32 width, U32 height, U32 mipLevels = 1) override {
         TextureDesc desc{};
         desc.width = width;
         desc.height = height;
@@ -319,7 +423,7 @@ public:
         desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
         desc.usage = ResourceUsage::ShaderResource;
         auto tex = std::make_unique<Texture>(m_Renderer->GetDevice(), desc);
-        ID3D12Resource* resource = tex->GetResource();
+        ID3D12Resource *resource = tex->GetResource();
         D3D12_RESOURCE_DESC rd = resource->GetDesc();
         U64 uploadSize = 0;
         m_Renderer->GetDevice().GetDevice()->
@@ -344,7 +448,7 @@ public:
         sub.pData = rgba8;
         sub.RowPitch = static_cast<LONG_PTR>(width) * 4;
         sub.SlicePitch = sub.RowPitch * height;
-        auto* cmd = m_Renderer->GetCurrentCommandList().GetCommandList();
+        auto *cmd = m_Renderer->GetCurrentCommandList().GetCommandList();
         D3D12_RESOURCE_BARRIER b0{};
         b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         b0.Transition.pResource = resource;
@@ -382,7 +486,7 @@ public:
         assert(m_InRenderPass, "Must be in render pass");
         if (texture >= m_Textures.size()) return;
         auto gpu = m_Textures[texture].srv.gpuHandle;
-        m_CurrentPassData->commands.push_back([=](ID3D12GraphicsCommandList* cmd) {
+        m_CurrentPassData->commands.push_back([=](ID3D12GraphicsCommandList *cmd) {
             cmd->SetGraphicsRootDescriptorTable(2, gpu);
         });
     }
@@ -391,7 +495,7 @@ public:
         assert(m_InRenderPass, "Must be in render pass");
         if (buffer >= m_ConstantBuffers.size()) return;
         auto addr = m_ConstantBuffers[buffer]->GetGPUAddress();
-        m_CurrentPassData->commands.push_back([=](ID3D12GraphicsCommandList* cmd) {
+        m_CurrentPassData->commands.push_back([=](ID3D12GraphicsCommandList *cmd) {
             if (slot == 0) cmd->SetGraphicsRootConstantBufferView(0, addr);
             else if (slot == 1) cmd->SetGraphicsRootConstantBufferView(1, addr);
             else if (slot == 2) cmd->SetGraphicsRootConstantBufferView(3, addr);
@@ -399,8 +503,8 @@ public:
     }
 
 private:
-    void ExecuteRenderPass(CommandList& cmdList, const FramePassData& passData) const {
-        auto* cmd = cmdList.GetCommandList();
+    void ExecuteRenderPass(CommandList &cmdList, const FramePassData &passData) const {
+        auto *cmd = cmdList.GetCommandList();
         D3D12_VIEWPORT viewport{
             0.0f, 0.0f, static_cast<float>(m_Renderer->GetSwapChain().GetWidth()),
             static_cast<float>(m_Renderer->GetSwapChain().GetHeight()), 0.0f, 1.0f
@@ -411,9 +515,11 @@ private:
         };
         cmd->RSSetViewports(1, &viewport);
         cmd->RSSetScissorRects(1, &scissor);
-        ID3D12DescriptorHeap* heaps[]{m_Renderer->GetCbvSrvUavHeap()->GetCurrentHeap()};
+        ID3D12DescriptorHeap *heaps[]{m_Renderer->GetCbvSrvUavHeap()->GetCurrentHeap()};
         cmd->SetDescriptorHeaps(1, heaps);
-        Resource rtResource{m_Renderer->GetCurrentRenderTarget(), D3D12_RESOURCE_STATE_PRESENT, ResourceType::Texture2D};
+        Resource rtResource{
+            m_Renderer->GetCurrentRenderTarget(), D3D12_RESOURCE_STATE_PRESENT, ResourceType::Texture2D
+        };
         rtResource.SetTracked(true);
         cmdList.TransitionResource(rtResource, D3D12_RESOURCE_STATE_RENDER_TARGET);
         auto rtvHandle = m_Renderer->GetCurrentRTV();
@@ -423,7 +529,8 @@ private:
             cmd->ClearRenderTargetView(rtvHandle, passData.passInfo.clearColorValue, 0, nullptr);
         }
         if (passData.passInfo.clearDepth) {
-            cmd->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, passData.passInfo.clearDepthValue, 0, 0, nullptr);
+            cmd->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, passData.passInfo.clearDepthValue, 0, 0,
+                                       nullptr);
         }
         if (m_CurrentPipeline != INVALID_INDEX) {
             m_Pipelines[m_CurrentPipeline]->Bind(cmd);
@@ -443,7 +550,7 @@ private:
             ibView.Format = DXGI_FORMAT_R32_UINT;
             cmd->IASetIndexBuffer(&ibView);
         }
-        for (const auto& command : passData.commands) command(cmd);
+        for (const auto &command: passData.commands) command(cmd);
         cmdList.TransitionResource(rtResource, D3D12_RESOURCE_STATE_PRESENT);
     }
 
@@ -459,6 +566,6 @@ private:
     }
 };
 
-export std::unique_ptr<IGraphicsContext> CreateDX12GraphicsContext(Window& window, const GraphicsConfig& config) {
+export std::unique_ptr<IGraphicsContext> CreateDX12GraphicsContext(Window &window, const GraphicsConfig &config) {
     return std::make_unique<DX12GraphicsContext>(window, config);
 }

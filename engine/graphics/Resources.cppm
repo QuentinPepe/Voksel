@@ -34,11 +34,10 @@ export enum class ResourceUsage : U32 {
     CopyDest = 1 << 9
 };
 
-inline ResourceUsage operator|(ResourceUsage a, ResourceUsage b) {
+export inline ResourceUsage operator|(ResourceUsage a, ResourceUsage b) {
     return static_cast<ResourceUsage>(static_cast<U32>(a) | static_cast<U32>(b));
 }
-
-inline ResourceUsage operator&(ResourceUsage a, ResourceUsage b) {
+export inline ResourceUsage operator&(ResourceUsage a, ResourceUsage b) {
     return static_cast<ResourceUsage>(static_cast<U32>(a) & static_cast<U32>(b));
 }
 
