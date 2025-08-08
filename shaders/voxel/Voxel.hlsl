@@ -33,10 +33,12 @@ struct VSOut {
 
 VSOut VSMain(VSIn i) {
     VSOut o;
-    float4 wp = mul(float4(i.pos,1.0f), gWorld);
+    float4 wp = mul(float4(i.pos,1), gWorld);
     o.svpos = mul(wp, gViewProj);
-    o.nrm = normalize(mul(float4(i.nrm,0.0f), gWorld).xyz);
-    o.uv = i.uv;
+    o.nrm = normalize(mul(float4(i.nrm,0), gWorld).xyz);
+
+    float side = 1.0f - step(0.5f, abs(i.nrm.y));
+    o.uv = float2(i.uv.x, lerp(i.uv.y, 1.0f - i.uv.y, side));
     o.mat = i.mat;
     return o;
 }
@@ -48,7 +50,6 @@ float4 PSMain(VSOut i) : SV_Target {
                          ty * (tileSize + 2 * pad) + pad);
 
     float2 fuv = frac(i.uv);
-    if (abs(i.nrm.y) < 0.5) fuv.y = 1.0f - fuv.y;
     uint2 px = basePx + (uint2)floor(fuv * tileSize);
 
     return gAtlas.Load(int3(px, 0));
