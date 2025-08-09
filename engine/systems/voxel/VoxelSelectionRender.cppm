@@ -59,7 +59,7 @@ public:
         assert(wcfg && wcfg->Size() > 0, "Missing VoxelWorldConfig");
         VoxelWorldConfig const* cfg{};
         for (auto [h,c] : *wcfg) { cfg = &c; break; }
-        const F32 bs{cfg->blockSize};
+        F32 const bs{cfg->blockSize};
 
         CameraConstants cam{};
         if (auto h{CameraManager::GetPrimaryCamera()}; h.valid()) {
@@ -72,14 +72,14 @@ public:
         }
         m_Gfx->UpdateConstantBuffer(m_CameraCB, &cam, sizeof(cam));
 
-        Math::Mat4 S{Math::Mat4::Scale(bs * 1.002f, bs * 1.002f, bs * 1.002f)};
+        Math::Mat4 S{Math::Mat4::Scale(bs * 1.01f, bs * 1.01f, bs * 1.01f)};
         Math::Mat4 T{Math::Mat4::Translation(
             (static_cast<F32>(sel.gx) + 0.5f) * bs,
             (static_cast<F32>(sel.gy) + 0.5f) * bs,
             (static_cast<F32>(sel.gz) + 0.5f) * bs
         )};
         ObjectConstants obj{};
-        obj.world = S * T;
+        obj.world = T * S;
         m_Gfx->UpdateConstantBuffer(m_ObjectCB, &obj, sizeof(obj));
 
         m_Gfx->SetPipeline(m_Pipeline);
@@ -103,7 +103,9 @@ private:
                    VSOut VSMain(VSIn i){
                        VSOut o;
                        float4 p = mul(float4(i.pos,1), gWorld);
-                       o.pos = mul(p, gViewProj);
+                       float4 clip = mul(p, gViewProj);
+                       clip.z -= 1e-4f * clip.w;
+                       o.pos = clip;
                        return o;
                    })";
             vs.entryPoint = "VSMain";
