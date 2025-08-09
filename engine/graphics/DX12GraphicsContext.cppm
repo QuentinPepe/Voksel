@@ -8,6 +8,7 @@ module;
 #include <vector>
 #include <functional>
 #include <string>
+#include <mutex>
 
 export module Graphics.DX12.GraphicsContext;
 
@@ -30,7 +31,6 @@ using Microsoft::WRL::ComPtr;
 
 struct ResourceHandle {
     enum Type { VertexBuffer, IndexBuffer, Pipeline } type;
-
     U32 index;
 };
 
@@ -39,11 +39,12 @@ private:
     std::unique_ptr<Renderer> m_Renderer;
     Window *m_Window;
     std::unique_ptr<ShaderManager> m_ShaderManager;
-    std::vector<std::unique_ptr<Buffer> > m_VertexBuffers;
-    std::vector<std::unique_ptr<Buffer> > m_IndexBuffers;
-    std::vector<std::unique_ptr<Buffer> > m_ConstantBuffers;
-    std::vector<std::unique_ptr<GraphicsPipeline> > m_Pipelines;
-    std::vector<std::unique_ptr<RootSignature> > m_RootSignatures;
+    std::vector<std::unique_ptr<Buffer>> m_VertexBuffers;
+    std::vector<std::unique_ptr<Buffer>> m_IndexBuffers;
+    std::vector<std::unique_ptr<Buffer>> m_ConstantBuffers;
+    std::vector<std::unique_ptr<GraphicsPipeline>> m_Pipelines;
+    std::vector<std::unique_ptr<RootSignature>> m_RootSignatures;
+    std::vector<D3D_PRIMITIVE_TOPOLOGY> m_PipelineTopologies;
 
     struct TextureEntry {
         std::unique_ptr<Texture> tex;
@@ -53,17 +54,16 @@ private:
     };
 
     std::vector<TextureEntry> m_Textures;
-    U32 m_CurrentPipeline = INVALID_INDEX;
-    U32 m_CurrentVertexBuffer = INVALID_INDEX;
-    U32 m_CurrentIndexBuffer = INVALID_INDEX;
     bool m_InRenderPass = false;
 
     struct FramePassData {
-        std::vector<std::function<void(ID3D12GraphicsCommandList *)> > commands;
+        std::vector<std::function<void(ID3D12GraphicsCommandList *)>> commands;
         RenderPassInfo passInfo;
     };
 
     std::unique_ptr<FramePassData> m_CurrentPassData;
+    std::mutex m_CmdMutex;
+    U32 m_CurrentPipelineIndex{UINT_MAX};
 
 public:
     DX12GraphicsContext(Window &window, const GraphicsConfig &config) : m_Window{&window} {
@@ -214,13 +214,13 @@ public:
     }
 
     U32 CreateConstantBuffer(U64 size) override {
-        U64 alignedSize = (size + 255) & ~255;
+        U64 alignedSize{(size + 255) & ~255};
         BufferDesc desc{};
         desc.size = alignedSize;
         desc.usage = ResourceUsage::ConstantBuffer;
         desc.cpuAccessible = true;
-        auto buffer = std::make_unique<Buffer>(m_Renderer->GetDevice(), desc);
-        U32 handle = static_cast<U32>(m_ConstantBuffers.size());
+        auto buffer{std::make_unique<Buffer>(m_Renderer->GetDevice(), desc)};
+        U32 handle{static_cast<U32>(m_ConstantBuffers.size())};
         m_ConstantBuffers.push_back(std::move(buffer));
         return handle;
     }
@@ -284,7 +284,7 @@ public:
                    | D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS
                    | D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS
                    | D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
-        auto rootSig = std::make_unique<RootSignature>(m_Renderer->GetDevice(), rs);
+        auto rootSig{std::make_unique<RootSignature>(m_Renderer->GetDevice(), rs)};
         GraphicsPipelineDesc pd{};
         for (auto const &sh: info.shaders) {
             std::string target{};
@@ -304,9 +304,7 @@ public:
             if (name == "NORMAL") fmt = DXGI_FORMAT_R32G32B32_FLOAT;
             else if (name == "TEXCOORD") fmt = DXGI_FORMAT_R32G32_FLOAT;
             else if (name == "COLOR") fmt = DXGI_FORMAT_R32_UINT;
-            layout.push_back(D3D12_INPUT_ELEMENT_DESC{
-                name.c_str(), 0, fmt, 0, off, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
-            });
+            layout.push_back(D3D12_INPUT_ELEMENT_DESC{name.c_str(), 0, fmt, 0, off, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0});
         }
         pd.inputLayout = std::move(layout);
         pd.rootSignature = rootSig->GetRootSignature();
@@ -316,10 +314,11 @@ public:
         pd.dsvFormat = DXGI_FORMAT_D32_FLOAT;
         if (!info.depthTest) pd.depthStencilState.DepthEnable = FALSE;
         if (!info.depthWrite) pd.depthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-        auto pipeline = std::make_unique<GraphicsPipeline>(m_Renderer->GetDevice(), pd);
+        auto pipeline{std::make_unique<GraphicsPipeline>(m_Renderer->GetDevice(), pd)};
         U32 id{static_cast<U32>(m_Pipelines.size())};
         m_Pipelines.push_back(std::move(pipeline));
         m_RootSignatures.push_back(std::move(rootSig));
+        m_PipelineTopologies.push_back(ConvertIATopology(info.topology));
         return id;
     }
 
@@ -345,53 +344,64 @@ public:
     void EndRenderPass() override {
         assert(m_InRenderPass, "Not in render pass");
         m_InRenderPass = false;
-        auto passData = std::make_shared<FramePassData>(std::move(*m_CurrentPassData));
+        auto passData{std::make_shared<FramePassData>(std::move(*m_CurrentPassData))};
         m_CurrentPassData = std::make_unique<FramePassData>();
-        m_Renderer->GetRenderGraph().AddPass<FramePassData>(
+        struct _NoPassData {};
+        m_Renderer->GetRenderGraph().AddPass<_NoPassData>(
             passData->passInfo.name,
-            [](RenderGraphBuilder &, FramePassData &) {
-            },
-            [this, passData](const RenderGraphResources &, CommandList &cmdList, const FramePassData &) {
+            [](RenderGraphBuilder &, _NoPassData &) {},
+            [this, passData](const RenderGraphResources &, CommandList &cmdList, const _NoPassData &) {
                 ExecuteRenderPass(cmdList, *passData);
             }
         );
     }
 
     void SetPipeline(U32 pipeline) override {
-        m_CurrentPipeline = pipeline;
+        assert(m_InRenderPass, "Must be in render pass");
+        if (pipeline >= m_Pipelines.size()) return;
+        m_CurrentPipelineIndex = pipeline;
+        std::lock_guard<std::mutex> lk{m_CmdMutex};
+        m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
+            m_Pipelines[pipeline]->Bind(cmd);
+            cmd->IASetPrimitiveTopology(m_PipelineTopologies[pipeline]);
+        });
     }
 
     void SetVertexBuffer(U32 buffer) override {
-        m_CurrentVertexBuffer = buffer;
+        assert(m_InRenderPass, "Must be in render pass");
+        if (buffer >= m_VertexBuffers.size()) return;
+        std::lock_guard<std::mutex> lk{m_CmdMutex};
+        m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
+            if (m_CurrentPipelineIndex != UINT_MAX) m_Pipelines[m_CurrentPipelineIndex]->Bind(cmd);
+            D3D12_VERTEX_BUFFER_VIEW vbView{};
+            vbView.BufferLocation = m_VertexBuffers[buffer]->GetGPUAddress();
+            vbView.SizeInBytes = static_cast<UINT>(m_VertexBuffers[buffer]->GetDesc().size);
+            vbView.StrideInBytes = sizeof(Vertex);
+            cmd->IASetVertexBuffers(0, 1, &vbView);
+        });
     }
 
     void SetIndexBuffer(U32 buffer) override {
-        m_CurrentIndexBuffer = buffer;
+        assert(m_InRenderPass, "Must be in render pass");
+        if (buffer >= m_IndexBuffers.size()) return;
+        std::lock_guard<std::mutex> lk{m_CmdMutex};
+        m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
+            if (m_CurrentPipelineIndex != UINT_MAX) m_Pipelines[m_CurrentPipelineIndex]->Bind(cmd);
+            D3D12_INDEX_BUFFER_VIEW ibView{};
+            ibView.BufferLocation = m_IndexBuffers[buffer]->GetGPUAddress();
+            ibView.SizeInBytes = static_cast<UINT>(m_IndexBuffers[buffer]->GetDesc().size);
+            ibView.Format = DXGI_FORMAT_R32_UINT;
+            cmd->IASetIndexBuffer(&ibView);
+        });
     }
 
     void Draw(U32 vertexCount, U32 instanceCount, U32 firstVertex, U32 firstInstance) override {
         assert(m_InRenderPass, "Must be in render pass");
-        const U32 pso = m_CurrentPipeline;
-        const U32 vb = m_CurrentVertexBuffer;
-        const U32 ib = m_CurrentIndexBuffer;
+        std::lock_guard<std::mutex> lk{m_CmdMutex};
         m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
-            if (pso != INVALID_INDEX) {
-                m_Pipelines[pso]->Bind(cmd);
-                cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-            }
-            if (vb != INVALID_INDEX) {
-                D3D12_VERTEX_BUFFER_VIEW vbView{};
-                vbView.BufferLocation = m_VertexBuffers[vb]->GetGPUAddress();
-                vbView.SizeInBytes = (UINT) m_VertexBuffers[vb]->GetDesc().size;
-                vbView.StrideInBytes = sizeof(Vertex);
-                cmd->IASetVertexBuffers(0, 1, &vbView);
-            }
-            if (ib != INVALID_INDEX) {
-                D3D12_INDEX_BUFFER_VIEW ibView{};
-                ibView.BufferLocation = m_IndexBuffers[ib]->GetGPUAddress();
-                ibView.SizeInBytes = (UINT) m_IndexBuffers[ib]->GetDesc().size;
-                ibView.Format = DXGI_FORMAT_R32_UINT;
-                cmd->IASetIndexBuffer(&ibView);
+            if (m_CurrentPipelineIndex != UINT_MAX) {
+                m_Pipelines[m_CurrentPipelineIndex]->Bind(cmd);
+                cmd->IASetPrimitiveTopology(m_PipelineTopologies[m_CurrentPipelineIndex]);
             }
             cmd->DrawInstanced(vertexCount, instanceCount, firstVertex, firstInstance);
         });
@@ -399,7 +409,12 @@ public:
 
     void DrawIndexed(U32 indexCount, U32 instanceCount, U32 firstIndex, S32 vertexOffset, U32 firstInstance) override {
         assert(m_InRenderPass, "Must be in render pass");
-        m_CurrentPassData->commands.push_back([=](ID3D12GraphicsCommandList *cmd) {
+        std::lock_guard<std::mutex> lk{m_CmdMutex};
+        m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
+            if (m_CurrentPipelineIndex != UINT_MAX) {
+                m_Pipelines[m_CurrentPipelineIndex]->Bind(cmd);
+                cmd->IASetPrimitiveTopology(m_PipelineTopologies[m_CurrentPipelineIndex]);
+            }
             cmd->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
         });
     }
@@ -422,12 +437,11 @@ public:
         desc.mipLevels = mipLevels;
         desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
         desc.usage = ResourceUsage::ShaderResource;
-        auto tex = std::make_unique<Texture>(m_Renderer->GetDevice(), desc);
-        ID3D12Resource *resource = tex->GetResource();
-        D3D12_RESOURCE_DESC rd = resource->GetDesc();
-        U64 uploadSize = 0;
-        m_Renderer->GetDevice().GetDevice()->
-                GetCopyableFootprints(&rd, 0, 1, 0, nullptr, nullptr, nullptr, &uploadSize);
+        auto tex{std::make_unique<Texture>(m_Renderer->GetDevice(), desc)};
+        ID3D12Resource *resource{tex->GetResource()};
+        D3D12_RESOURCE_DESC rd{resource->GetDesc()};
+        U64 uploadSize{0};
+        m_Renderer->GetDevice().GetDevice()->GetCopyableFootprints(&rd, 0, 1, 0, nullptr, nullptr, nullptr, &uploadSize);
         D3D12_HEAP_PROPERTIES heapProps{};
         heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
         D3D12_RESOURCE_DESC bufDesc{};
@@ -448,7 +462,7 @@ public:
         sub.pData = rgba8;
         sub.RowPitch = static_cast<LONG_PTR>(width) * 4;
         sub.SlicePitch = sub.RowPitch * height;
-        auto *cmd = m_Renderer->GetCurrentCommandList().GetCommandList();
+        auto *cmd{m_Renderer->GetCurrentCommandList().GetCommandList()};
         D3D12_RESOURCE_BARRIER b0{};
         b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         b0.Transition.pResource = resource;
@@ -465,7 +479,7 @@ public:
         b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
         b1.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
         cmd->ResourceBarrier(1, &b1);
-        auto handle = m_Renderer->GetCbvSrvUavHeap()->Allocate();
+        auto handle{m_Renderer->GetCbvSrvUavHeap()->Allocate()};
         D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
         srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srv.Format = desc.format;
@@ -477,7 +491,7 @@ public:
         entry.srv = handle;
         entry.width = width;
         entry.height = height;
-        U32 id = static_cast<U32>(m_Textures.size());
+        U32 id{static_cast<U32>(m_Textures.size())};
         m_Textures.push_back(std::move(entry));
         return id;
     }
@@ -485,8 +499,10 @@ public:
     void SetTexture(U32 texture, U32 slot) override {
         assert(m_InRenderPass, "Must be in render pass");
         if (texture >= m_Textures.size()) return;
-        auto gpu = m_Textures[texture].srv.gpuHandle;
-        m_CurrentPassData->commands.push_back([=](ID3D12GraphicsCommandList *cmd) {
+        auto gpu{m_Textures[texture].srv.gpuHandle};
+        std::lock_guard<std::mutex> lk{m_CmdMutex};
+        m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
+            if (m_CurrentPipelineIndex != UINT_MAX) m_Pipelines[m_CurrentPipelineIndex]->Bind(cmd);
             cmd->SetGraphicsRootDescriptorTable(2, gpu);
         });
     }
@@ -494,8 +510,10 @@ public:
     void SetConstantBuffer(U32 buffer, U32 slot) override {
         assert(m_InRenderPass, "Must be in render pass");
         if (buffer >= m_ConstantBuffers.size()) return;
-        auto addr = m_ConstantBuffers[buffer]->GetGPUAddress();
-        m_CurrentPassData->commands.push_back([=](ID3D12GraphicsCommandList *cmd) {
+        auto addr{m_ConstantBuffers[buffer]->GetGPUAddress()};
+        std::lock_guard<std::mutex> lk{m_CmdMutex};
+        m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
+            if (m_CurrentPipelineIndex != UINT_MAX) m_Pipelines[m_CurrentPipelineIndex]->Bind(cmd);
             if (slot == 0) cmd->SetGraphicsRootConstantBufferView(0, addr);
             else if (slot == 1) cmd->SetGraphicsRootConstantBufferView(1, addr);
             else if (slot == 2) cmd->SetGraphicsRootConstantBufferView(3, addr);
@@ -504,53 +522,26 @@ public:
 
 private:
     void ExecuteRenderPass(CommandList &cmdList, const FramePassData &passData) const {
-        auto *cmd = cmdList.GetCommandList();
-        D3D12_VIEWPORT viewport{
-            0.0f, 0.0f, static_cast<float>(m_Renderer->GetSwapChain().GetWidth()),
-            static_cast<float>(m_Renderer->GetSwapChain().GetHeight()), 0.0f, 1.0f
-        };
-        D3D12_RECT scissor{
-            0, 0, static_cast<LONG>(m_Renderer->GetSwapChain().GetWidth()),
-            static_cast<LONG>(m_Renderer->GetSwapChain().GetHeight())
-        };
+        auto *cmd{cmdList.GetCommandList()};
+        D3D12_VIEWPORT viewport{0.0f, 0.0f, static_cast<float>(m_Renderer->GetSwapChain().GetWidth()), static_cast<float>(m_Renderer->GetSwapChain().GetHeight()), 0.0f, 1.0f};
+        D3D12_RECT scissor{0, 0, static_cast<LONG>(m_Renderer->GetSwapChain().GetWidth()), static_cast<LONG>(m_Renderer->GetSwapChain().GetHeight())};
         cmd->RSSetViewports(1, &viewport);
         cmd->RSSetScissorRects(1, &scissor);
         ID3D12DescriptorHeap *heaps[]{m_Renderer->GetCbvSrvUavHeap()->GetCurrentHeap()};
         cmd->SetDescriptorHeaps(1, heaps);
-        Resource rtResource{
-            m_Renderer->GetCurrentRenderTarget(), D3D12_RESOURCE_STATE_PRESENT, ResourceType::Texture2D
-        };
+        Resource rtResource{m_Renderer->GetCurrentRenderTarget(), D3D12_RESOURCE_STATE_PRESENT, ResourceType::Texture2D};
         rtResource.SetTracked(true);
         cmdList.TransitionResource(rtResource, D3D12_RESOURCE_STATE_RENDER_TARGET);
-        auto rtvHandle = m_Renderer->GetCurrentRTV();
-        auto dsvHandle = m_Renderer->GetDSV();
+        auto rtvHandle{m_Renderer->GetCurrentRTV()};
+        auto dsvHandle{m_Renderer->GetDSV()};
         cmd->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
         if (passData.passInfo.clearColor) {
             cmd->ClearRenderTargetView(rtvHandle, passData.passInfo.clearColorValue, 0, nullptr);
         }
         if (passData.passInfo.clearDepth) {
-            cmd->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, passData.passInfo.clearDepthValue, 0, 0,
-                                       nullptr);
+            cmd->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, passData.passInfo.clearDepthValue, 0, 0, nullptr);
         }
-        if (m_CurrentPipeline != INVALID_INDEX) {
-            m_Pipelines[m_CurrentPipeline]->Bind(cmd);
-            cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        }
-        if (m_CurrentVertexBuffer != INVALID_INDEX) {
-            D3D12_VERTEX_BUFFER_VIEW vbView{};
-            vbView.BufferLocation = m_VertexBuffers[m_CurrentVertexBuffer]->GetGPUAddress();
-            vbView.SizeInBytes = static_cast<UINT>(m_VertexBuffers[m_CurrentVertexBuffer]->GetDesc().size);
-            vbView.StrideInBytes = sizeof(Vertex);
-            cmd->IASetVertexBuffers(0, 1, &vbView);
-        }
-        if (m_CurrentIndexBuffer != INVALID_INDEX) {
-            D3D12_INDEX_BUFFER_VIEW ibView{};
-            ibView.BufferLocation = m_IndexBuffers[m_CurrentIndexBuffer]->GetGPUAddress();
-            ibView.SizeInBytes = static_cast<UINT>(m_IndexBuffers[m_CurrentIndexBuffer]->GetDesc().size);
-            ibView.Format = DXGI_FORMAT_R32_UINT;
-            cmd->IASetIndexBuffer(&ibView);
-        }
-        for (const auto &command: passData.commands) command(cmd);
+        for (auto const &command: passData.commands) command(cmd);
         cmdList.TransitionResource(rtResource, D3D12_RESOURCE_STATE_PRESENT);
     }
 
@@ -562,6 +553,17 @@ private:
             case PrimitiveTopology::LineStrip: return D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
             case PrimitiveTopology::PointList: return D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT;
             default: return D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        }
+    }
+
+    static D3D12_PRIMITIVE_TOPOLOGY ConvertIATopology(PrimitiveTopology topology) {
+        switch (topology) {
+            case PrimitiveTopology::TriangleList: return D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+            case PrimitiveTopology::TriangleStrip: return D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+            case PrimitiveTopology::LineList: return D3D_PRIMITIVE_TOPOLOGY_LINELIST;
+            case PrimitiveTopology::LineStrip: return D3D_PRIMITIVE_TOPOLOGY_LINESTRIP;
+            case PrimitiveTopology::PointList: return D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
+            default: return D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
         }
     }
 };

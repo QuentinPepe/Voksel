@@ -33,6 +33,8 @@ import Systems.VoxelGeneration;
 import Systems.VoxelMeshing;
 import Systems.VoxelUpload;
 import Systems.VoxelRenderer;
+import Systems.VoxelEdit;
+import Systems.VoxelSelectionRender;
 
 import Math.Core;
 import Math.Vector;
@@ -87,6 +89,7 @@ int main() {
     cc.aspectRatio = static_cast<F32>(wc.width) / wc.height;
     cc.nearPlane = 0.1f;
     cc.farPlane = 500.0f;
+    cc.isPrimary = true;
     cc.UpdateProjection();
 
     auto cfgEntity{world.CreateEntity()};
@@ -124,9 +127,13 @@ int main() {
     auto *voxelMesher{scheduler->AddSystem<VoxelMeshingSystem>()};
     auto *voxelUpload{scheduler->AddSystem<VoxelUploadSystem>()};
     auto *voxelRenderer{scheduler->AddSystem<VoxelRendererSystem>()};
+    auto *voxelEdit{scheduler->AddSystem<VoxelEditSystem>()};
+    voxelEdit->SetInputManager(&inputManager);
+    auto *voxelSel{scheduler->AddSystem<VoxelSelectionRenderSystem>()};
 
     voxelUpload->SetGraphicsContext(graphics.get());
     voxelRenderer->SetGraphicsContext(graphics.get());
+    voxelSel->SetGraphicsContext(graphics.get());
 
     orchestratorECS.BuildECSExecutionGraph(&world);
 

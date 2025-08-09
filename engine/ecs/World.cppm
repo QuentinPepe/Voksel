@@ -9,11 +9,17 @@ export class World {
 private:
     struct IComponentStorageBase {
         virtual ~IComponentStorageBase() = default;
+
         [[nodiscard]] virtual bool Contains(EntityHandle handle) const = 0;
-        [[nodiscard]] virtual void* GetRaw(EntityHandle handle) = 0;
-        [[nodiscard]] virtual const void* GetRaw(EntityHandle handle) const = 0;
+
+        [[nodiscard]] virtual void *GetRaw(EntityHandle handle) = 0;
+
+        [[nodiscard]] virtual const void *GetRaw(EntityHandle handle) const = 0;
+
         virtual void Remove(EntityHandle handle) = 0;
+
         virtual void Clear() = 0;
+
         [[nodiscard]] virtual USize Size() const = 0;
     };
 
@@ -26,11 +32,11 @@ private:
             return storage.Contains(handle);
         }
 
-        [[nodiscard]] void* GetRaw(EntityHandle handle) override {
+        [[nodiscard]] void *GetRaw(EntityHandle handle) override {
             return storage.Get(handle);
         }
 
-        [[nodiscard]] const void* GetRaw(EntityHandle handle) const override {
+        [[nodiscard]] const void *GetRaw(EntityHandle handle) const override {
             return storage.Get(handle);
         }
 
@@ -46,17 +52,17 @@ private:
             return storage.Size();
         }
 
-        ComponentStorage<T>* GetStorage() { return &storage; }
+        ComponentStorage<T> *GetStorage() { return &storage; }
     };
 
     EntityManager m_EntityManager{};
-    UnorderedMap<ComponentID, UniquePtr<IComponentStorageBase>> m_Storages{};
+    UnorderedMap<ComponentID, UniquePtr<IComponentStorageBase> > m_Storages{};
     UnorderedMap<EntityHandle, Archetype> m_EntityArchetypes{};
 
     void UpdateEntityArchetype(EntityHandle handle) {
         Archetype arch = 0;
 
-        for (const auto& [compId, storage] : m_Storages) {
+        for (const auto &[compId, storage]: m_Storages) {
             if (storage->Contains(handle)) {
                 arch |= (1ULL << compId);
             }
@@ -99,31 +105,58 @@ public:
     }
 
     template<typename T>
-    void AddComponent(EntityHandle handle, T&& component) {
+    void AddComponent(EntityHandle handle, T &&component) {
         assert(handle.valid(), "Invalid entity handle");
 
         using U = std::remove_cvref_t<T>;
 
-        const ComponentID componentID{ ComponentRegistry::GetID<U>() };
+        const ComponentID componentID{ComponentRegistry::GetID<U>()};
 
         if (!m_Storages.contains(componentID)) {
-            m_Storages[componentID] = std::make_unique<TypedStorage<U>>();
+            m_Storages[componentID] = std::make_unique<TypedStorage<U> >();
         }
 
-        auto* typed = static_cast<TypedStorage<U>*>(m_Storages[componentID].get());
+        auto *typed = static_cast<TypedStorage<U> *>(m_Storages[componentID].get());
 
-        U tmp{ std::forward<T>(component) };
+        U tmp{std::forward<T>(component)};
         typed->GetStorage()->Insert(handle, std::move(tmp));
 
         m_EntityArchetypes[handle] |= (1ULL << componentID);
     }
 
     template<typename T>
+    T &AddOrReplaceComponent(EntityHandle handle, T &&component) {
+        assert(handle.valid(), "Invalid entity handle");
+
+        using U = std::remove_cvref_t<T>;
+        const ComponentID componentID{ComponentRegistry::GetID<U>()};
+
+        if (!m_Storages.contains(componentID)) {
+            m_Storages[componentID] = std::make_unique<TypedStorage<U> >();
+        }
+        auto *typed = static_cast<TypedStorage<U> *>(m_Storages[componentID].get());
+
+        U tmp{std::forward<T>(component)};
+
+        if (typed->Contains(handle)) {
+            // replace
+            *static_cast<U *>(typed->GetRaw(handle)) = std::move(tmp);
+        } else {
+            // add
+            typed->GetStorage()->Insert(handle, std::move(tmp));
+            m_EntityArchetypes[handle] |= (1ULL << componentID);
+        }
+
+        return *static_cast<U *>(typed->GetRaw(handle));
+    }
+
+
+    template<typename T>
     void RemoveComponent(EntityHandle handle) {
         if (!handle.valid()) return;
 
         using U = std::remove_cvref_t<T>;
-        const ComponentID componentID{ ComponentRegistry::GetID<U>() };
+        const ComponentID componentID{ComponentRegistry::GetID<U>()};
 
         auto it = m_Storages.find(componentID);
         if (it == m_Storages.end()) return;
@@ -133,32 +166,32 @@ public:
     }
 
     template<typename T>
-    [[nodiscard]] T* GetComponent(EntityHandle handle) {
+    [[nodiscard]] T *GetComponent(EntityHandle handle) {
         if (!handle.valid()) return nullptr;
 
         using U = std::remove_cvref_t<T>;
-        const ComponentID componentID{ ComponentRegistry::GetID<U>() };
+        const ComponentID componentID{ComponentRegistry::GetID<U>()};
 
         auto it = m_Storages.find(componentID);
         if (it == m_Storages.end()) return nullptr;
 
-        return static_cast<T*>(it->second->GetRaw(handle));
+        return static_cast<T *>(it->second->GetRaw(handle));
     }
 
     template<typename T>
-    [[nodiscard]] const T* GetComponent(EntityHandle handle) const {
-        return const_cast<World*>(this)->GetComponent<T>(handle);
+    [[nodiscard]] const T *GetComponent(EntityHandle handle) const {
+        return const_cast<World *>(this)->GetComponent<T>(handle);
     }
 
     template<typename T>
-    [[nodiscard]] ComponentStorage<std::remove_cvref_t<T>>* GetStorage() {
+    [[nodiscard]] ComponentStorage<std::remove_cvref_t<T> > *GetStorage() {
         using U = std::remove_cvref_t<T>;
-        const ComponentID componentID{ ComponentRegistry::GetID<U>() };
+        const ComponentID componentID{ComponentRegistry::GetID<U>()};
 
         auto it = m_Storages.find(componentID);
         if (it == m_Storages.end()) return nullptr;
 
-        return static_cast<TypedStorage<U>*>(it->second.get())->GetStorage();
+        return static_cast<TypedStorage<U> *>(it->second.get())->GetStorage();
     }
 
     [[nodiscard]] Archetype GetEntityArchetype(EntityHandle handle) const {

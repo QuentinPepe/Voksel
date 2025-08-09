@@ -17,6 +17,8 @@ export enum ComponentIDs : ComponentID {
     VoxelMesh_ID,
     VoxelRenderResources_ID,
     VoxelStreamingConfig_ID,
+    VoxelSelection_ID,
+    VoxelRayHit_ID,
 
     // Game specific components
     GAME_COMPONENT_START
