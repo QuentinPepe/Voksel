@@ -15,13 +15,19 @@ import Core.Types;
 import Core.Assert;
 import std;
 
-static inline void BuildCubeTris(Vector<Math::Vec3>& pos, Vector<U32>& idx) {
+static inline void BuildCubeEdges(Vector<Math::Vec3>& pos, Vector<U32>& idx) {
     pos = {
-        {-0.5f,-0.5f,-0.5f},{+0.5f,-0.5f,-0.5f},{+0.5f,+0.5f,-0.5f},{-0.5f,+0.5f,-0.5f},
-        {-0.5f,-0.5f,+0.5f},{+0.5f,-0.5f,+0.5f},{+0.5f,+0.5f,+0.5f},{-0.5f,+0.5f,+0.5f}
+        {-0.5f, -0.5f, -0.5f}, {+0.5f, -0.5f, -0.5f}, {+0.5f, +0.5f, -0.5f}, {-0.5f, +0.5f, -0.5f},
+        {-0.5f, -0.5f, +0.5f}, {+0.5f, -0.5f, +0.5f}, {+0.5f, +0.5f, +0.5f}, {-0.5f, +0.5f, +0.5f}
     };
-    U32 e[]{0,1,2,0,2,3,4,6,5,4,7,6,0,4,5,0,5,1,3,2,6,3,6,7,1,5,6,1,6,2,0,3,7,0,7,4};
-    idx.assign(e, e + 36);
+
+    U32 e[] = {
+        0,1, 1,2, 2,3, 3,0,
+        4,5, 5,6, 6,7, 7,4,
+        0,4, 1,5, 2,6, 3,7
+    };
+
+    idx.assign(e, e + 24);
 }
 
 export class VoxelSelectionRenderSystem : public System<VoxelSelectionRenderSystem> {
@@ -43,7 +49,9 @@ public:
         SetParallel(false);
     }
 
-    void SetGraphicsContext(IGraphicsContext* gfx) { m_Gfx = gfx; }
+    void SetGraphicsContext(IGraphicsContext* gfx) {
+        m_Gfx = gfx;
+    }
 
     void Run(World* world, F32) override {
         assert(m_Gfx != nullptr, "GraphicsContext must be set");
@@ -51,14 +59,20 @@ public:
 
         VoxelSelection sel{};
         if (auto* s{world->GetStorage<VoxelSelection>()}) {
-            for (auto [h,c] : *s) { sel = c; break; }
+            for (auto [h,c] : *s) {
+                sel = c;
+                break;
+            }
         }
         if (!sel.valid) return;
 
         auto* wcfg{world->GetStorage<VoxelWorldConfig>()};
         assert(wcfg && wcfg->Size() > 0, "Missing VoxelWorldConfig");
         VoxelWorldConfig const* cfg{};
-        for (auto [h,c] : *wcfg) { cfg = &c; break; }
+        for (auto [h,c] : *wcfg) {
+            cfg = &c;
+            break;
+        }
         F32 const bs{cfg->blockSize};
 
         CameraConstants cam{};
@@ -68,7 +82,9 @@ public:
                 cam.projection = c->projection;
                 cam.viewProjection = c->viewProjection;
             }
-            if (auto* t{world->GetComponent<Transform>(h)}) { cam.cameraPosition = t->position; }
+            if (auto* t{world->GetComponent<Transform>(h)}) {
+                cam.cameraPosition = t->position;
+            }
         }
         m_Gfx->UpdateConstantBuffer(m_CameraCB, &cam, sizeof(cam));
 
@@ -112,14 +128,14 @@ private:
             vs.stage = ShaderStage::Vertex;
 
             ShaderCode ps{};
-            ps.source = R"(float4 PSMain() : SV_Target { return float4(1.0,1.0,0.0,0.35); })";
+            ps.source = R"(float4 PSMain() : SV_Target { return float4(1.0,1.0,0.0,1.0); })";
             ps.entryPoint = "PSMain";
             ps.stage = ShaderStage::Pixel;
 
             pi.shaders = {vs, ps};
             pi.vertexAttributes = {{"POSITION", 0}};
             pi.vertexStride = static_cast<U32>(sizeof(Math::Vec3));
-            pi.topology = PrimitiveTopology::TriangleList;
+            pi.topology = PrimitiveTopology::LineList;
             pi.depthTest = true;
             pi.depthWrite = false;
             m_Pipeline = m_Gfx->CreateGraphicsPipeline(pi);
@@ -128,15 +144,19 @@ private:
         if (m_VB == INVALID_INDEX) {
             Vector<Math::Vec3> pos{};
             Vector<U32> idx{};
-            BuildCubeTris(pos, idx);
+            BuildCubeEdges(pos, idx);
             m_VCount = static_cast<U32>(pos.size());
             m_ICount = static_cast<U32>(idx.size());
             m_VB = m_Gfx->CreateVertexBuffer(pos.data(), static_cast<U64>(pos.size() * sizeof(Math::Vec3)));
             m_IB = m_Gfx->CreateIndexBuffer(idx.data(), static_cast<U64>(idx.size() * sizeof(U32)));
         }
 
-        if (m_CameraCB == INVALID_INDEX) m_CameraCB = m_Gfx->CreateConstantBuffer(sizeof(CameraConstants));
-        if (m_ObjectCB == INVALID_INDEX) m_ObjectCB = m_Gfx->CreateConstantBuffer(sizeof(ObjectConstants));
+        if (m_CameraCB == INVALID_INDEX) {
+            m_CameraCB = m_Gfx->CreateConstantBuffer(sizeof(CameraConstants));
+        }
+        if (m_ObjectCB == INVALID_INDEX) {
+            m_ObjectCB = m_Gfx->CreateConstantBuffer(sizeof(ObjectConstants));
+        }
         assert(sizeof(Math::Vec3) == 12 || sizeof(Math::Vec3) == 16, "Unexpected Vec3 size");
     }
 };
