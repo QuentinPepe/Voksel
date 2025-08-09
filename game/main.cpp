@@ -44,6 +44,9 @@ import Tasks.ECSIntegration;
 import Tasks.TaskGraph;
 import Tasks.TaskProfiler;
 
+import Systems.UI;
+import UI.Core;
+
 int main() {
     Logger::EnableColor(false);
     Logger::Info("Starting Voksel Engine – Voxel demo v{}.{}.{}", 0, 2, 0);
@@ -134,6 +137,48 @@ int main() {
     voxelUpload->SetGraphicsContext(graphics.get());
     voxelRenderer->SetGraphicsContext(graphics.get());
     voxelSel->SetGraphicsContext(graphics.get());
+
+    auto *uiSys{scheduler->AddSystem<UISystem>()};
+    uiSys->SetGraphicsContext(graphics.get());
+    uiSys->SetWindow(&window);
+    uiSys->SetInputManager(&inputManager);
+    uiSys->RegisterPanel([](UIContext& ui) {
+        UILayout root{};
+        root.dir = UIDirection::Column;
+        root.width = UIUnit::Percent(0.30f);
+        root.height = UIUnit::Auto();
+        root.pad = 8.0f;
+        root.gap = 6.0f;
+        root.anchor = Math::Vec2{0.0f, 0.0f};
+        root.offset = Math::Vec2{12.0f, 12.0f};
+        auto panel{ui.Begin(root, 0x222222AAu, 6.0f)};
+
+        UILayout row{};
+        row.dir = UIDirection::Row;
+        row.width = UIUnit::Percent(1.0f);
+        row.height = UIUnit::Px(36.0f);
+        row.gap = 6.0f;
+        auto r{ui.Begin(row)};
+
+        UILayout bL{};
+        bL.width = UIUnit::Percent(0.5f);
+        bL.height = UIUnit::Percent(1.0f);
+        bool a{ui.Button("A", bL, 0x2E7DD1FFu, 4.0f)};
+
+        UILayout bR{};
+        bR.width = UIUnit::Percent(0.5f);
+        bR.height = UIUnit::Percent(1.0f);
+        bool b{ui.Button("B", bR, 0x51C151FFu, 4.0f)};
+        ui.End(r);
+
+        UILayout bar{};
+        bar.width = UIUnit::Percent(1.0f);
+        bar.height = UIUnit::Px(10.0f);
+        F32 t{ui.Time01()};
+        ui.Progress(bar, t, 0xFFFFFFFFu, 0x2E7DD1FFu, 3.0f);
+
+        ui.End(panel);
+    });
 
     orchestratorECS.BuildECSExecutionGraph(&world);
 
