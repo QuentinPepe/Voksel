@@ -45,6 +45,7 @@ private:
     std::vector<std::unique_ptr<GraphicsPipeline>> m_Pipelines;
     std::vector<std::unique_ptr<RootSignature>> m_RootSignatures;
     std::vector<D3D_PRIMITIVE_TOPOLOGY> m_PipelineTopologies;
+    std::vector<UINT> m_PipelineVertexStrides;
 
     struct TextureEntry {
         std::unique_ptr<Texture> tex;
@@ -319,6 +320,7 @@ public:
         m_Pipelines.push_back(std::move(pipeline));
         m_RootSignatures.push_back(std::move(rootSig));
         m_PipelineTopologies.push_back(ConvertIATopology(info.topology));
+        m_PipelineVertexStrides.push_back(info.vertexStride);
         return id;
     }
 
@@ -360,23 +362,25 @@ public:
         assert(m_InRenderPass, "Must be in render pass");
         if (pipeline >= m_Pipelines.size()) return;
         m_CurrentPipelineIndex = pipeline;
+        const U32 p = pipeline;
         std::lock_guard<std::mutex> lk{m_CmdMutex};
         m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
-            m_Pipelines[pipeline]->Bind(cmd);
-            cmd->IASetPrimitiveTopology(m_PipelineTopologies[pipeline]);
+            m_Pipelines[p]->Bind(cmd);
+            cmd->IASetPrimitiveTopology(m_PipelineTopologies[p]);
         });
     }
 
     void SetVertexBuffer(U32 buffer) override {
         assert(m_InRenderPass, "Must be in render pass");
         if (buffer >= m_VertexBuffers.size()) return;
+        const U32 p = m_CurrentPipelineIndex;
         std::lock_guard<std::mutex> lk{m_CmdMutex};
         m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
-            if (m_CurrentPipelineIndex != UINT_MAX) m_Pipelines[m_CurrentPipelineIndex]->Bind(cmd);
+            if (p != UINT_MAX) m_Pipelines[p]->Bind(cmd);
             D3D12_VERTEX_BUFFER_VIEW vbView{};
             vbView.BufferLocation = m_VertexBuffers[buffer]->GetGPUAddress();
             vbView.SizeInBytes = static_cast<UINT>(m_VertexBuffers[buffer]->GetDesc().size);
-            vbView.StrideInBytes = sizeof(Vertex);
+            vbView.StrideInBytes = (p != UINT_MAX ? m_PipelineVertexStrides[p] : static_cast<UINT>(sizeof(Vertex)));
             cmd->IASetVertexBuffers(0, 1, &vbView);
         });
     }
@@ -384,9 +388,10 @@ public:
     void SetIndexBuffer(U32 buffer) override {
         assert(m_InRenderPass, "Must be in render pass");
         if (buffer >= m_IndexBuffers.size()) return;
+        const U32 p = m_CurrentPipelineIndex;
         std::lock_guard<std::mutex> lk{m_CmdMutex};
         m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
-            if (m_CurrentPipelineIndex != UINT_MAX) m_Pipelines[m_CurrentPipelineIndex]->Bind(cmd);
+            if (p != UINT_MAX) m_Pipelines[p]->Bind(cmd);
             D3D12_INDEX_BUFFER_VIEW ibView{};
             ibView.BufferLocation = m_IndexBuffers[buffer]->GetGPUAddress();
             ibView.SizeInBytes = static_cast<UINT>(m_IndexBuffers[buffer]->GetDesc().size);
@@ -397,11 +402,12 @@ public:
 
     void Draw(U32 vertexCount, U32 instanceCount, U32 firstVertex, U32 firstInstance) override {
         assert(m_InRenderPass, "Must be in render pass");
+        const U32 p = m_CurrentPipelineIndex;
         std::lock_guard<std::mutex> lk{m_CmdMutex};
         m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
-            if (m_CurrentPipelineIndex != UINT_MAX) {
-                m_Pipelines[m_CurrentPipelineIndex]->Bind(cmd);
-                cmd->IASetPrimitiveTopology(m_PipelineTopologies[m_CurrentPipelineIndex]);
+            if (p != UINT_MAX) {
+                m_Pipelines[p]->Bind(cmd);
+                cmd->IASetPrimitiveTopology(m_PipelineTopologies[p]);
             }
             cmd->DrawInstanced(vertexCount, instanceCount, firstVertex, firstInstance);
         });
@@ -409,11 +415,12 @@ public:
 
     void DrawIndexed(U32 indexCount, U32 instanceCount, U32 firstIndex, S32 vertexOffset, U32 firstInstance) override {
         assert(m_InRenderPass, "Must be in render pass");
+        const U32 p = m_CurrentPipelineIndex;
         std::lock_guard<std::mutex> lk{m_CmdMutex};
         m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
-            if (m_CurrentPipelineIndex != UINT_MAX) {
-                m_Pipelines[m_CurrentPipelineIndex]->Bind(cmd);
-                cmd->IASetPrimitiveTopology(m_PipelineTopologies[m_CurrentPipelineIndex]);
+            if (p != UINT_MAX) {
+                m_Pipelines[p]->Bind(cmd);
+                cmd->IASetPrimitiveTopology(m_PipelineTopologies[p]);
             }
             cmd->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
         });
@@ -496,13 +503,14 @@ public:
         return id;
     }
 
-    void SetTexture(U32 texture, U32 slot) override {
+    void SetTexture(U32 texture, U32 ) override {
         assert(m_InRenderPass, "Must be in render pass");
         if (texture >= m_Textures.size()) return;
         auto gpu{m_Textures[texture].srv.gpuHandle};
+        const U32 p = m_CurrentPipelineIndex;
         std::lock_guard<std::mutex> lk{m_CmdMutex};
         m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
-            if (m_CurrentPipelineIndex != UINT_MAX) m_Pipelines[m_CurrentPipelineIndex]->Bind(cmd);
+            if (p != UINT_MAX) m_Pipelines[p]->Bind(cmd);
             cmd->SetGraphicsRootDescriptorTable(2, gpu);
         });
     }
@@ -511,9 +519,10 @@ public:
         assert(m_InRenderPass, "Must be in render pass");
         if (buffer >= m_ConstantBuffers.size()) return;
         auto addr{m_ConstantBuffers[buffer]->GetGPUAddress()};
+        const U32 p = m_CurrentPipelineIndex;
         std::lock_guard<std::mutex> lk{m_CmdMutex};
         m_CurrentPassData->commands.push_back([=, this](ID3D12GraphicsCommandList *cmd) {
-            if (m_CurrentPipelineIndex != UINT_MAX) m_Pipelines[m_CurrentPipelineIndex]->Bind(cmd);
+            if (p != UINT_MAX) m_Pipelines[p]->Bind(cmd);
             if (slot == 0) cmd->SetGraphicsRootConstantBufferView(0, addr);
             else if (slot == 1) cmd->SetGraphicsRootConstantBufferView(1, addr);
             else if (slot == 2) cmd->SetGraphicsRootConstantBufferView(3, addr);

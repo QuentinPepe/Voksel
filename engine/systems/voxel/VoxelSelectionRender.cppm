@@ -44,6 +44,7 @@ public:
         SetName("VoxelSelectionRender");
         SetStage(SystemStage::Render);
         SetPriority(SystemPriority::High);
+        SetParallel(false);
     }
 
     void SetGraphicsContext(IGraphicsContext *gfx) { m_Gfx = gfx; }
