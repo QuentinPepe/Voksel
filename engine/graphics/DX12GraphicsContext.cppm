@@ -31,7 +31,6 @@ using Microsoft::WRL::ComPtr;
 
 struct ResourceHandle {
     enum Type { VertexBuffer, IndexBuffer, Pipeline } type;
-
     U32 index;
 };
 
@@ -40,11 +39,11 @@ private:
     std::unique_ptr<Renderer> m_Renderer;
     Window *m_Window;
     std::unique_ptr<ShaderManager> m_ShaderManager;
-    std::vector<std::unique_ptr<Buffer> > m_VertexBuffers;
-    std::vector<std::unique_ptr<Buffer> > m_IndexBuffers;
-    std::vector<std::unique_ptr<Buffer> > m_ConstantBuffers;
-    std::vector<std::unique_ptr<GraphicsPipeline> > m_Pipelines;
-    std::vector<std::unique_ptr<RootSignature> > m_RootSignatures;
+    std::vector<std::unique_ptr<Buffer>> m_VertexBuffers;
+    std::vector<std::unique_ptr<Buffer>> m_IndexBuffers;
+    std::vector<std::unique_ptr<Buffer>> m_ConstantBuffers;
+    std::vector<std::unique_ptr<GraphicsPipeline>> m_Pipelines;
+    std::vector<std::unique_ptr<RootSignature>> m_RootSignatures;
     std::vector<D3D_PRIMITIVE_TOPOLOGY> m_PipelineTopologies;
     std::vector<UINT> m_PipelineVertexStrides;
 
@@ -59,7 +58,7 @@ private:
     bool m_InRenderPass = false;
 
     struct FramePassData {
-        std::vector<std::function<void(ID3D12GraphicsCommandList *)> > commands;
+        std::vector<std::function<void(ID3D12GraphicsCommandList *)>> commands;
         RenderPassInfo passInfo;
     };
 
@@ -233,6 +232,7 @@ public:
     }
 
     U32 CreateGraphicsPipeline(const GraphicsPipelineCreateInfo &info) override {
+
         std::vector<D3D12_ROOT_PARAMETER> rootParams{};
         D3D12_ROOT_PARAMETER p0{};
         p0.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
@@ -263,7 +263,7 @@ public:
         D3D12_ROOT_PARAMETER p3{};
         p3.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         p3.Descriptor = {2, 0};
-        p3.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        p3.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
         rootParams.push_back(p3);
 
         D3D12_STATIC_SAMPLER_DESC samp{};
@@ -314,9 +314,7 @@ public:
             if (name == "NORMAL") fmt = DXGI_FORMAT_R32G32B32_FLOAT;
             else if (name == "TEXCOORD") fmt = DXGI_FORMAT_R32G32_FLOAT;
             else if (name == "COLOR") fmt = DXGI_FORMAT_R32_UINT;
-            layout.push_back(D3D12_INPUT_ELEMENT_DESC{
-                name.c_str(), 0, fmt, 0, off, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
-            });
+            layout.push_back(D3D12_INPUT_ELEMENT_DESC{name.c_str(), 0, fmt, 0, off, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0});
         }
         pd.inputLayout = std::move(layout);
         pd.rootSignature = rootSig->GetRootSignature();
@@ -370,12 +368,10 @@ public:
         auto passData{std::make_shared<FramePassData>(std::move(*m_CurrentPassData))};
         m_CurrentPassData = std::make_unique<FramePassData>();
 
-        struct _NoPassData {
-        };
+        struct _NoPassData {};
         m_Renderer->GetRenderGraph().AddPass<_NoPassData>(
             passData->passInfo.name,
-            [](RenderGraphBuilder &, _NoPassData &) {
-            },
+            [](RenderGraphBuilder &, _NoPassData &) {},
             [this, passData](const RenderGraphResources &, CommandList &cmdList, const _NoPassData &) {
                 ExecuteRenderPass(cmdList, *passData);
             }
@@ -472,8 +468,7 @@ public:
         ID3D12Resource *resource{tex->GetResource()};
         D3D12_RESOURCE_DESC rd{resource->GetDesc()};
         U64 uploadSize{0};
-        m_Renderer->GetDevice().GetDevice()->
-                GetCopyableFootprints(&rd, 0, 1, 0, nullptr, nullptr, nullptr, &uploadSize);
+        m_Renderer->GetDevice().GetDevice()->GetCopyableFootprints(&rd, 0, 1, 0, nullptr, nullptr, nullptr, &uploadSize);
 
         D3D12_HEAP_PROPERTIES heapProps{};
         heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -561,22 +556,16 @@ public:
 private:
     void ExecuteRenderPass(CommandList &cmdList, const FramePassData &passData) const {
         auto *cmd{cmdList.GetCommandList()};
-        D3D12_VIEWPORT viewport{
-            0.0f, 0.0f, static_cast<float>(m_Renderer->GetSwapChain().GetWidth()),
-            static_cast<float>(m_Renderer->GetSwapChain().GetHeight()), 0.0f, 1.0f
-        };
-        D3D12_RECT scissor{
-            0, 0, static_cast<LONG>(m_Renderer->GetSwapChain().GetWidth()),
-            static_cast<LONG>(m_Renderer->GetSwapChain().GetHeight())
-        };
+        D3D12_VIEWPORT viewport{0.0f, 0.0f, static_cast<float>(m_Renderer->GetSwapChain().GetWidth()),
+                                static_cast<float>(m_Renderer->GetSwapChain().GetHeight()), 0.0f, 1.0f};
+        D3D12_RECT scissor{0, 0, static_cast<LONG>(m_Renderer->GetSwapChain().GetWidth()),
+                           static_cast<LONG>(m_Renderer->GetSwapChain().GetHeight())};
         cmd->RSSetViewports(1, &viewport);
         cmd->RSSetScissorRects(1, &scissor);
         ID3D12DescriptorHeap *heaps[]{m_Renderer->GetCbvSrvUavHeap()->GetCurrentHeap()};
         cmd->SetDescriptorHeaps(1, heaps);
 
-        Resource rtResource{
-            m_Renderer->GetCurrentRenderTarget(), D3D12_RESOURCE_STATE_PRESENT, ResourceType::Texture2D
-        };
+        Resource rtResource{m_Renderer->GetCurrentRenderTarget(), D3D12_RESOURCE_STATE_PRESENT, ResourceType::Texture2D};
         rtResource.SetTracked(true);
         cmdList.TransitionResource(rtResource, D3D12_RESOURCE_STATE_RENDER_TARGET);
         auto rtvHandle{m_Renderer->GetCurrentRTV()};
@@ -587,8 +576,7 @@ private:
             cmd->ClearRenderTargetView(rtvHandle, passData.passInfo.clearColorValue, 0, nullptr);
         }
         if (passData.passInfo.clearDepth) {
-            cmd->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, passData.passInfo.clearDepthValue, 0, 0,
-                                       nullptr);
+            cmd->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, passData.passInfo.clearDepthValue, 0, 0, nullptr);
         }
 
         for (auto const &command: passData.commands) command(cmd);
