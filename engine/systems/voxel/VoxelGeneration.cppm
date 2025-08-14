@@ -118,7 +118,14 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
                                     Voxel v{Voxel::Air};
                                     if (gy < h - 3) v = Voxel::Stone;
                                     else if (gy < h - 1) v = Voxel::Dirt;
-                                    else if (gy == h - 1) v = Voxel::Grass;
+                                    else if (gy == h - 1) {
+                                        v = Voxel::Grass;
+
+                                        if (noise::rnd(job.cx * NX + x, job.cz * NZ + z) < 0.0005f) {
+                                            GenerateTree(blocks, x, y + 1, z); // y+1 car sur la surface
+                                        }
+                                    }
+
                                     blocks[VoxelIndex(x, y, z)] = v;
                                 }
                             }
@@ -133,6 +140,38 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
             }
         });
     }
+
+    static void GenerateTree(Vector<Voxel>& blocks, U32 baseX, U32 baseY, U32 baseZ) {
+        constexpr U32 trunkHeight = 4; // Hauteur du tronc
+        constexpr U32 leavesRadius = 2; // Rayon des feuilles
+
+        // Tronc
+        for (U32 y = 0; y < trunkHeight; ++y) {
+            blocks[VoxelIndex(baseX, baseY + y, baseZ)] = Voxel::Stone;
+        }
+
+        // Feuilles (cube ou sphère approximative)
+        for (S32 x = -static_cast<S32>(leavesRadius); x <= static_cast<S32>(leavesRadius); ++x) {
+            for (S32 y = trunkHeight - 1; y <= trunkHeight + leavesRadius; ++y) {
+                for (S32 z = -static_cast<S32>(leavesRadius); z <= static_cast<S32>(leavesRadius); ++z) {
+                    S32 dx = baseX + x;
+                    S32 dy = baseY + y;
+                    S32 dz = baseZ + z;
+
+                    // Vérifie que c'est dans le chunk
+                    if (dx >= 0 && dx < VoxelChunk::SizeX &&
+                        dy >= 0 && dy < VoxelChunk::SizeY &&
+                        dz >= 0 && dz < VoxelChunk::SizeZ) {
+
+                        // Ignore le centre du tronc
+                        if (!(x == 0 && z == 0 && y >= trunkHeight - 1))
+                            blocks[VoxelIndex(dx, dy, dz)] = Voxel::Dirt;
+                        }
+                }
+            }
+        }
+    }
+
 
 public:
     void Setup() {
