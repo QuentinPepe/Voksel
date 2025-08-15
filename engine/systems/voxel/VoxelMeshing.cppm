@@ -48,7 +48,7 @@ namespace {
         return back ? NZ : PZ;
     }
 
-    static inline U64 PackKey(S32 x, S32 y, S32 z) {
+    inline U64 PackKey(S32 x, S32 y, S32 z) {
         constexpr U64 B{1ull << 20};
         return (static_cast<U64>(static_cast<S64>(x) + static_cast<S64>(B)))
              | (static_cast<U64>(static_cast<S64>(y) + static_cast<S64>(B)) << 21)
@@ -101,7 +101,7 @@ public:
         for (auto [h,c] : *chunkStore) {
             if (!c.dirty || c.generating || c.blocks.size() != kCount) continue;
             Math::Vec3 center{c.origin.x + 0.5f * sx, c.origin.y + 0.5f * sy, c.origin.z + 0.5f * sz};
-            dirty.push_back({(center - camPos).LengthSquared(), h});
+            dirty.push_back(Item{(center - camPos).LengthSquared(), h});
         }
 
         if (dirty.empty()) return;
@@ -126,32 +126,37 @@ public:
             mesh->cpuVertices.reserve(reserveCount);
 
             VoxelChunk const* nb[3][3][3]{};
-            for (S32 dz=-1; dz<=1; ++dz) {
-                for (S32 dy=-1; dy<=1; ++dy) {
-                    for (S32 dx=-1; dx<=1; ++dx) {
-                        S32 ccx = static_cast<S32>(chunk->cx) + dx;
-                        S32 ccy = static_cast<S32>(chunk->cy) + dy;
-                        S32 ccz = static_cast<S32>(chunk->cz) + dz;
-                        auto itn = chunkMap.find(PackKey(ccx,ccy,ccz));
+            for (S32 dz{-1}; dz<=1; ++dz) {
+                for (S32 dy{-1}; dy<=1; ++dy) {
+                    for (S32 dx{-1}; dx<=1; ++dx) {
+                        S32 ccx{static_cast<S32>(chunk->cx) + dx};
+                        S32 ccy{static_cast<S32>(chunk->cy) + dy};
+                        S32 ccz{static_cast<S32>(chunk->cz) + dz};
+                        auto itn{chunkMap.find(PackKey(ccx,ccy,ccz))};
                         nb[dx+1][dy+1][dz+1] = (itn==chunkMap.end()? nullptr : itn->second);
                     }
                 }
             }
 
             auto sample = [&](S32 lx, S32 ly, S32 lz) -> Voxel {
-                S32 nx = 0, ny = 0, nz = 0;
+                S32 nx{0}, ny{0}, nz{0};
                 if (lx < 0) { nx = -1; lx += NX; } else if (lx >= NX) { nx = 1; lx -= NX; }
                 if (ly < 0) { ny = -1; ly += NY; } else if (ly >= NY) { ny = 1; ly -= NY; }
                 if (lz < 0) { nz = -1; lz += NZ; } else if (lz >= NZ) { nz = 1; lz -= NZ; }
-                VoxelChunk const* ch = nb[nx+1][ny+1][nz+1];
+                VoxelChunk const* ch{nb[nx+1][ny+1][nz+1]};
                 if (!ch) return Voxel::Air;
                 return ch->blocks[VoxelIndex(static_cast<U32>(lx), static_cast<U32>(ly), static_cast<U32>(lz))];
             };
 
             auto makePos = [&](S32 gx, S32 gy, S32 gz) -> Math::Vec3 {
-                return {chunk->origin.x + static_cast<F32>(gx) * s,
-                        chunk->origin.y + static_cast<F32>(gy) * s,
-                        chunk->origin.z + static_cast<F32>(gz) * s};
+                const S64 Cx{static_cast<S64>(static_cast<S32>(chunk->cx))};
+                const S64 Cy{static_cast<S64>(static_cast<S32>(chunk->cy))};
+                const S64 Cz{static_cast<S64>(static_cast<S32>(chunk->cz))};
+                const F64 ds{static_cast<F64>(s)};
+                const F64 X{(Cx * static_cast<S64>(NX) + static_cast<S64>(gx)) * ds};
+                const F64 Y{(Cy * static_cast<S64>(NY) + static_cast<S64>(gy)) * ds};
+                const F64 Z{(Cz * static_cast<S64>(NZ) + static_cast<S64>(gz)) * ds};
+                return Math::Vec3{static_cast<F32>(X), static_cast<F32>(Y), static_cast<F32>(Z)};
             };
 
             auto greedyAxis = [&](S32 d) {
@@ -160,7 +165,7 @@ public:
                 S32 v{(d + 2) % 3};
                 struct Cell { U32 tile; bool back; bool set; };
                 static thread_local Vector<Cell> mask;
-                USize maskSize = static_cast<USize>(dims[u] * dims[v]);
+                USize maskSize{static_cast<USize>(dims[u] * dims[v])};
                 if (mask.size() < maskSize) mask.resize(maskSize);
                 S32 x[3]{0,0,0};
                 for (x[d]=0; x[d] <= dims[d]; ++x[d]) {
