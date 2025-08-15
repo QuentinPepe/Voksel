@@ -51,8 +51,14 @@ public:
     }
 
     void UpdateLayout() override {
-        UIElement::UpdateLayout();
+        CalculateLocalRect();
+        CalculateWorldRect();
+        m_DirtyLayout = false;
+        m_DirtyTransform = false;
         LayoutChildren();
+        for (auto& child : m_Children) {
+            child->UpdateLayout();
+        }
     }
 
 protected:
@@ -99,6 +105,7 @@ protected:
 
             Math::Vec2 childPos{start.x, currentY};
 
+            // Horizontal alignment within the layout
             switch (m_ChildAlignment) {
                 case Alignment::Center:
                     childPos.x += (width - childSize.x) * 0.5f;
@@ -144,6 +151,7 @@ protected:
 
             Math::Vec2 childPos{currentX, start.y};
 
+            // Vertical alignment within the layout
             switch (m_ChildAlignment) {
                 case Alignment::Center:
                     childPos.y += (height - childSize.y) * 0.5f;
@@ -207,8 +215,14 @@ public:
     }
 
     void UpdateLayout() override {
-        UIElement::UpdateLayout();
+        CalculateLocalRect();
+        CalculateWorldRect();
+        m_DirtyLayout = false;
+        m_DirtyTransform = false;
         LayoutGrid();
+        for (auto& child : m_Children) {
+            child->UpdateLayout();
+        }
     }
 
 protected:
