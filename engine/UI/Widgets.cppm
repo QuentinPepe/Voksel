@@ -18,7 +18,7 @@ public:
     void SetBorderColor(const Color& color) { m_BorderColor = color; }
 
 protected:
-    void OnDraw(class UIRenderer* renderer) override;
+    void OnDraw(class UIRenderer* renderer);
 };
 
 export class UIText : public UIElement {

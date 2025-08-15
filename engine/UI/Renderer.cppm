@@ -3,6 +3,7 @@ export module UI.Renderer;
 import UI.Core;
 import UI.Element;
 import UI.Widgets;
+import UI.Font;
 import Graphics;
 import Core.Types;
 import Math.Vector;
@@ -22,11 +23,11 @@ private:
     U32 m_VertexBuffer{INVALID_INDEX};
     U32 m_IndexBuffer{INVALID_INDEX};
     U32 m_ConstantBuffer{INVALID_INDEX};
-
     Vector<UIVertex> m_Vertices;
     Vector<U32> m_Indices;
-
     Math::Vec2 m_ScreenSize{1280.0f, 720.0f};
+    std::shared_ptr<UIFont> m_Font{};
+    U32 m_WhiteTex{INVALID_INDEX};
 
 public:
     explicit UIRenderer(IGraphicsContext* graphics) : m_Graphics{graphics} {
@@ -44,38 +45,28 @@ public:
 
     void EndFrame() {
         if (m_Vertices.empty()) return;
-
         UpdateBuffers();
-
-        struct UIConstants {
-            Math::Mat4 projection;
-        } constants;
-
+        struct UIConstants { Math::Mat4 projection; } constants{};
         constants.projection = Math::Mat4::Orthographic(0, m_ScreenSize.x, m_ScreenSize.y, 0, -1, 1);
         m_Graphics->UpdateConstantBuffer(m_ConstantBuffer, &constants, sizeof(constants));
-
         m_Graphics->SetPipeline(m_Pipeline);
         m_Graphics->SetVertexBuffer(m_VertexBuffer);
         m_Graphics->SetIndexBuffer(m_IndexBuffer);
         m_Graphics->SetConstantBuffer(m_ConstantBuffer, 0);
+        if (m_Font) m_Graphics->SetTexture(m_Font->GetTexture(), 0);
+        else m_Graphics->SetTexture(m_WhiteTex, 0);
         m_Graphics->DrawIndexed(static_cast<U32>(m_Indices.size()));
     }
 
     void DrawRect(const Rect& rect, const Color& color) {
-        U32 baseVertex = static_cast<U32>(m_Vertices.size());
+        U32 base = static_cast<U32>(m_Vertices.size());
         U32 col = color.ToRGBA();
-
-        m_Vertices.push_back({{rect.Left(), rect.Top()}, {0, 0}, col});
-        m_Vertices.push_back({{rect.Right(), rect.Top()}, {1, 0}, col});
-        m_Vertices.push_back({{rect.Right(), rect.Bottom()}, {1, 1}, col});
-        m_Vertices.push_back({{rect.Left(), rect.Bottom()}, {0, 1}, col});
-
-        m_Indices.push_back(baseVertex + 0);
-        m_Indices.push_back(baseVertex + 1);
-        m_Indices.push_back(baseVertex + 2);
-        m_Indices.push_back(baseVertex + 0);
-        m_Indices.push_back(baseVertex + 2);
-        m_Indices.push_back(baseVertex + 3);
+        Math::Vec2 uv{-1.0f, -1.0f};
+        m_Vertices.push_back({{rect.Left(),  rect.Top()},    uv, col});
+        m_Vertices.push_back({{rect.Right(), rect.Top()},    uv, col});
+        m_Vertices.push_back({{rect.Right(), rect.Bottom()}, uv, col});
+        m_Vertices.push_back({{rect.Left(),  rect.Bottom()}, uv, col});
+        m_Indices.insert(m_Indices.end(), {base+0,base+1,base+2, base+0,base+2,base+3});
     }
 
     void DrawRectOutline(const Rect& rect, const Color& color, F32 thickness) {
@@ -85,100 +76,121 @@ public:
         DrawRect({rect.Right() - thickness, rect.Top() + thickness, thickness, rect.size.y - 2 * thickness}, color);
     }
 
-    void DrawText(const std::string& text, const Math::Vec2& position, U32 fontSize, const Color& color) {
+    void DrawText(const std::string& text, const Rect& r, U32 fontSize, const Color& color,
+                  Alignment hAlign, Alignment vAlign) {
+        if (!m_Font) return;
+        F32 px{static_cast<F32>(fontSize)};
+        auto size{m_Font->MeasureText(text, px)};
+        Math::Vec2 pos{r.position};
+        if (hAlign == Alignment::Center) pos.x += (r.size.x - size.x) * 0.5f;
+        else if (hAlign == Alignment::End) pos.x += (r.size.x - size.x);
+        F32 lineH{(m_Font->GetAscent() - m_Font->GetDescent() + m_Font->GetLineGap()) * (px / m_Font->GetBakePx())};
+        F32 totalH{size.y};
+        if (vAlign == Alignment::Center) pos.y += (r.size.y - totalH) * 0.5f;
+        else if (vAlign == Alignment::End) pos.y += (r.size.y - totalH);
+        F32 s{px / m_Font->GetBakePx()};
+        F32 cursorX{0.0f};
+        F32 baselineY{pos.y + m_Font->GetAscent() * s};
+        U32 col = color.ToRGBA();
+        U32 prev{0};
+        for (size_t i{0}; i < text.size();) {
+            U32 cp{};
+            size_t n{UIFont::DecodeUTF8(text, i, cp)};
+            if (n == 0) break;
+            i += n;
+            if (cp == '\n') {
+                cursorX = 0.0f;
+                baselineY += lineH;
+                prev = 0;
+                continue;
+            }
+            if (prev) cursorX += m_Font->KerningAtBakePx(prev, cp) * s;
+            F32 x0{}, y0{}, x1{}, y1{}, u0{}, v0{}, u1{}, v1{}, adv{};
+            m_Font->GetQuad(cp, cursorX / s, 0.0f, x0, y0, x1, y1, u0, v0, u1, v1, adv);
+            F32 qx0{pos.x + x0 * s};
+            F32 qy0{baselineY + y0 * s};
+            F32 qx1{pos.x + x1 * s};
+            F32 qy1{baselineY + y1 * s};
+            U32 base = static_cast<U32>(m_Vertices.size());
+            m_Vertices.push_back({{qx0, qy0}, {u0, v0}, col});
+            m_Vertices.push_back({{qx1, qy0}, {u1, v0}, col});
+            m_Vertices.push_back({{qx1, qy1}, {u1, v1}, col});
+            m_Vertices.push_back({{qx0, qy1}, {u0, v1}, col});
+            m_Indices.insert(m_Indices.end(), {base+0,base+1,base+2, base+0,base+2,base+3});
+            cursorX += adv * s;
+            prev = cp;
+        }
     }
+
+    void DrawText(const std::string& text, const Math::Vec2& position, U32 fontSize, const Color& color) {
+        Rect r{position, {1e6f, 1e6f}};
+        DrawText(text, r, fontSize, color, Alignment::Start, Alignment::Start);
+    }
+
+    void SetFont(std::shared_ptr<UIFont> font) { m_Font = std::move(font); }
+    IGraphicsContext* GetGraphics() { return m_Graphics; }
 
 private:
     void Initialize() {
         CreatePipeline();
         CreateBuffers();
+        U8 w[4]{255,255,255,255};
+        m_WhiteTex = m_Graphics->CreateTexture2D(w, 1, 1, 1);
     }
 
     void CreatePipeline() {
         GraphicsPipelineCreateInfo info{};
-
         ShaderCode vs{};
         vs.source = R"(
-            cbuffer UIConstants : register(b0) {
-                float4x4 projection;
-            }
-            struct VSInput {
-                float2 position : POSITION;
-                float2 uv : TEXCOORD;
-                uint color : COLOR;
-            };
-            struct VSOutput {
-                float4 position : SV_Position;
-                float2 uv : TEXCOORD;
-                float4 color : COLOR;
-            };
-            VSOutput VSMain(VSInput input) {
-                VSOutput output;
-                output.position = mul(float4(input.position, 0, 1), projection);
-                output.uv = input.uv;
-                uint c = input.color;
-                output.color = float4(
-                    ((c >> 24) & 0xFF) / 255.0,
-                    ((c >> 16) & 0xFF) / 255.0,
-                    ((c >> 8) & 0xFF) / 255.0,
-                    (c & 0xFF) / 255.0
-                );
-                return output;
+            cbuffer UIConstants : register(b0) { float4x4 projection; }
+            struct VSInput { float2 position:POSITION; float2 uv:TEXCOORD; uint color:COLOR; };
+            struct VSOutput { float4 position:SV_Position; float2 uv:TEXCOORD; float4 color:COLOR; };
+            VSOutput VSMain(VSInput i){
+                VSOutput o;
+                o.position = mul(float4(i.position,0,1), projection);
+                o.uv = i.uv;
+                uint c = i.color;
+                o.color = float4(((c>>24)&255)/255.0, ((c>>16)&255)/255.0, ((c>>8)&255)/255.0, (c&255)/255.0);
+                return o;
             }
         )";
         vs.entryPoint = "VSMain";
         vs.stage = ShaderStage::Vertex;
-
         ShaderCode ps{};
         ps.source = R"(
-            struct PSInput {
-                float4 position : SV_Position;
-                float2 uv : TEXCOORD;
-                float4 color : COLOR;
-            };
-            float4 PSMain(PSInput input) : SV_Target {
-                return input.color;
+            Texture2D gTex : register(t0);
+            SamplerState gSamp : register(s0);
+            struct PSInput { float4 position:SV_Position; float2 uv:TEXCOORD; float4 color:COLOR; };
+            float4 PSMain(PSInput i):SV_Target{
+                float a = (i.uv.x < 0.0) ? 1.0 : gTex.Sample(gSamp, i.uv).a;
+                return float4(i.color.rgb, i.color.a * a);
             }
         )";
         ps.entryPoint = "PSMain";
         ps.stage = ShaderStage::Pixel;
-
         info.shaders = {vs, ps};
-        info.vertexAttributes = {
-            {"POSITION", 0},
-            {"TEXCOORD", 8},
-            {"COLOR", 16}
-        };
+        info.vertexAttributes = {{"POSITION", 0}, {"TEXCOORD", 8}, {"COLOR", 16}};
         info.vertexStride = sizeof(UIVertex);
         info.topology = PrimitiveTopology::TriangleList;
         info.depthTest = false;
         info.depthWrite = false;
-
         m_Pipeline = m_Graphics->CreateGraphicsPipeline(info);
         m_ConstantBuffer = m_Graphics->CreateConstantBuffer(sizeof(Math::Mat4));
     }
 
     void CreateBuffers() {
-        const U32 maxVertices = 10000;
-        const U32 maxIndices = 30000;
-
+        const U32 maxVertices{10000};
+        const U32 maxIndices{30000};
         m_VertexBuffer = m_Graphics->CreateVertexBuffer(nullptr, maxVertices * sizeof(UIVertex));
         m_IndexBuffer = m_Graphics->CreateIndexBuffer(nullptr, maxIndices * sizeof(U32));
     }
 
     void UpdateBuffers() {
         if (!m_Vertices.empty()) {
-            m_VertexBuffer = m_Graphics->CreateVertexBuffer(
-                m_Vertices.data(),
-                m_Vertices.size() * sizeof(UIVertex)
-            );
+            m_VertexBuffer = m_Graphics->CreateVertexBuffer(m_Vertices.data(), m_Vertices.size() * sizeof(UIVertex));
         }
-
         if (!m_Indices.empty()) {
-            m_IndexBuffer = m_Graphics->CreateIndexBuffer(
-                m_Indices.data(),
-                m_Indices.size() * sizeof(U32)
-            );
+            m_IndexBuffer = m_Graphics->CreateIndexBuffer(m_Indices.data(), m_Indices.size() * sizeof(U32));
         }
     }
 };
@@ -191,29 +203,5 @@ void UIPanel::OnDraw(UIRenderer* renderer) {
 }
 
 void UIText::OnDraw(UIRenderer* renderer) {
-    Math::Vec2 textPos = m_WorldRect.Center();
-
-    switch (m_HorizontalAlign) {
-        case Alignment::Start:
-            textPos.x = m_WorldRect.Left();
-            break;
-        case Alignment::End:
-            textPos.x = m_WorldRect.Right();
-            break;
-        default:
-            break;
-    }
-
-    switch (m_VerticalAlign) {
-        case Alignment::Start:
-            textPos.y = m_WorldRect.Top();
-            break;
-        case Alignment::End:
-            textPos.y = m_WorldRect.Bottom();
-            break;
-        default:
-            break;
-    }
-
-    renderer->DrawText(m_Text, textPos, m_FontSize, m_TextColor);
+    renderer->DrawText(m_Text, m_WorldRect, m_FontSize, m_TextColor, m_HorizontalAlign, m_VerticalAlign);
 }

@@ -76,6 +76,7 @@ int main() {
 
    UIManager uiManager{graphics.get(), &inputManager};
    uiManager.SetScreenSize(static_cast<F32>(wc.width), static_cast<F32>(wc.height));
+   uiManager.SetFontFromTTF("assets/fonts/Roboto-Regular.ttf", 48.0f);
 
    World world{};
 
