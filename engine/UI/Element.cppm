@@ -43,12 +43,13 @@ public:
 
     void AddChild(UIElementPtr child) {
         if (child && child.get() != this) {
-            if (auto oldParent = child->m_Parent.lock()) {
+            if (auto oldParent{child->m_Parent.lock()}) {
                 oldParent->RemoveChild(child);
             }
             m_Children.push_back(child);
             child->m_Parent = weak_from_this();
             child->MarkDirty();
+            MarkDirty();
         }
     }
 
