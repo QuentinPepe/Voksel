@@ -276,26 +276,30 @@ int main() {
    std::static_pointer_cast<UIPanel>(debugPanel)->SetBackgroundColor(Color{0.0f, 0.0f, 0.0f, 0.7f});
    uiManager.GetRoot()->AddChild(debugPanel);
 
-   auto debugLayout = uiManager.CreateVerticalLayout();
-   debugLayout->SetAnchor(AnchorPreset::StretchAll);
-   debugLayout->SetMargin(Margin{5.0f});
-   std::static_pointer_cast<UIVerticalLayout>(debugLayout)->SetSpacing(2.0f);
-   debugPanel->AddChild(debugLayout);
+    auto debugLayout = uiManager.CreateVerticalLayout();
+    auto v = std::static_pointer_cast<UIVerticalLayout>(debugLayout);
+    v->SetPadding(Margin{5.0f});
+    v->SetSpacing(2.0f);
+    v->SetChildControl(true, false);
+    v->SetChildForceExpand(false, false);
+    debugPanel->AddChild(debugLayout);
 
-   auto fpsText = uiManager.CreateText("FPS: 60");
-   std::static_pointer_cast<UIText>(fpsText)->SetTextColor(Color{0.0f, 1.0f, 0.0f, 1.0f});
-   std::static_pointer_cast<UIText>(fpsText)->SetAlignment(Alignment::Start, Alignment::Center);
-   debugLayout->AddChild(fpsText);
+    auto sized = [](UIElementPtr e, float h){
+        e->SetAnchor(AnchorPreset::TopLeft);
+        e->SetPivot({0,0});
+        e->SetSizeDelta({190.0f, h});
+    };
 
-   auto posText = uiManager.CreateText("Pos: 0, 0, 0");
-   std::static_pointer_cast<UIText>(posText)->SetTextColor(Color::White);
-   std::static_pointer_cast<UIText>(posText)->SetAlignment(Alignment::Start, Alignment::Center);
-   debugLayout->AddChild(posText);
+    auto fpsText   = uiManager.CreateText("FPS: 60");
+    std::static_pointer_cast<UIText>(fpsText)->SetTextColor(Color{0,1,0,1});
+    sized(fpsText, 16.0f);  v->AddChild(fpsText);
 
-   auto chunkText = uiManager.CreateText("Chunks: 0");
-   std::static_pointer_cast<UIText>(chunkText)->SetTextColor(Color::White);
-   std::static_pointer_cast<UIText>(chunkText)->SetAlignment(Alignment::Start, Alignment::Center);
-   debugLayout->AddChild(chunkText);
+    auto posText   = uiManager.CreateText("Pos: 0, 0, 0");
+    sized(posText, 16.0f);  v->AddChild(posText);
+
+    auto chunkText = uiManager.CreateText("Chunks: 0");
+    sized(chunkText, 16.0f); v->AddChild(chunkText);
+
 
    windowInput.SetResizeCallback([&graphics, &uiManager, &updateHotbar](U32 w, U32 h) {
        if (w > 0 && h > 0) {
@@ -404,7 +408,7 @@ int main() {
            hotbarSlots[selectedSlot].selectionBorder->SetVisibility(Visibility::Visible);
        }
 
-       if (inputManager.IsKeyJustPressed(Key::F1)) {
+       if (inputManager.IsKeyJustPressed(Key::F3)) {
            bool isVisible = debugPanel->IsVisible();
            debugPanel->SetVisibility(isVisible ? Visibility::Hidden : Visibility::Visible);
        }
@@ -417,7 +421,7 @@ int main() {
            }
        }
 
-       if (inputManager.IsKeyJustPressed(Key::F3)) {
+       if (inputManager.IsKeyJustPressed(Key::F5)) {
            bool profilingEnabled = !orchestrator.IsProfilingEnabled();
            orchestrator.SetProfilingEnabled(profilingEnabled);
            TaskProfiler::Get().SetEnabled(profilingEnabled);

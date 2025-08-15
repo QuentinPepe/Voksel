@@ -64,7 +64,7 @@ public:
 
         stbtt_pack_context pc{};
         assert(stbtt_PackBegin(&pc, alpha.data(), static_cast<int>(m_AtlasW), static_cast<int>(m_AtlasH), 0, 1, nullptr) != 0, "pack begin failed");
-        stbtt_PackSetOversampling(&pc, 2, 2);
+        stbtt_PackSetOversampling(&pc, 3, 3);
 
         m_Packed.resize(Last - First + 1);
         assert(stbtt_PackFontRange(&pc, m_Info.data, 0, m_BakePx, First, Last - First + 1, m_Packed.data()) != 0, "pack range failed");
