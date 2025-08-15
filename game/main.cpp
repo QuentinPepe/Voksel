@@ -112,6 +112,14 @@ int main() {
    scfg.removeBudget = 16;
    world.AddComponent(streamCfgEntity, scfg);
 
+   // Hotbar data in ECS
+   auto hotbarStateEntity{world.CreateEntity()};
+   VoxelHotbarState hb{};
+   hb.slots = {Voxel::Dirt, Voxel::Grass, Voxel::Stone, Voxel::Log, Voxel::Leaves};
+   hb.selectedIndex = 0;
+   hb.selected = hb.slots[hb.selectedIndex];
+   world.AddComponent(hotbarStateEntity, hb);
+
    auto hotbarContainer = uiManager.CreatePanel("HotbarContainer");
    hotbarContainer->SetAnchor(AnchorPreset::BottomCenter);
    hotbarContainer->SetPivot({0.5f, 1.0f});
@@ -127,74 +135,41 @@ int main() {
    std::static_pointer_cast<UIHorizontalLayout>(hotbarLayout)->SetChildAlignment(Alignment::Center);
    hotbarContainer->AddChild(hotbarLayout);
 
-   enum class BlockType : U8 {
-       Dirt = 1,
-       Grass = 2,
-       Stone = 3,
-       Wood = 4,
-       Leaves = 5,
-       Sand = 6,
-       Glass = 7,
-       Brick = 8,
-       Water = 9
-   };
-
-   BlockType selectedBlock{BlockType::Dirt};
-   S32 selectedSlot{0};
-
    struct HotbarSlot {
        UIElementPtr panel;
        UIElementPtr icon;
        UIElementPtr countText;
        UIElementPtr selectionBorder;
-       BlockType blockType;
+       Voxel voxel;
        U32 count;
    };
 
    Vector<HotbarSlot> hotbarSlots{};
 
-   const Vector<std::pair<BlockType, std::string>> blockData{
-       {BlockType::Dirt, "Dirt"},
-       {BlockType::Grass, "Grass"},
-       {BlockType::Stone, "Stone"},
-       {BlockType::Wood, "Wood"},
-       {BlockType::Leaves, "Leaves"},
-       {BlockType::Sand, "Sand"},
-       {BlockType::Glass, "Glass"},
-       {BlockType::Brick, "Brick"},
-       {BlockType::Water, "Water"}
+   struct Item { Voxel v; const char* name; Color color; };
+   Vector<Item> items{
+       Item{Voxel::Dirt,  "Dirt",  Color{0.52f, 0.37f, 0.26f, 1.0f}},
+       Item{Voxel::Grass, "Grass", Color{0.37f, 0.62f, 0.21f, 1.0f}},
+       Item{Voxel::Stone, "Stone", Color{0.5f,  0.5f,  0.5f,  1.0f}},
+       Item{Voxel::Log,   "Wood",  Color{0.64f, 0.42f, 0.2f,  1.0f}},
+       Item{Voxel::Leaves,"Leaves",Color{0.2f,  0.6f,  0.2f,  0.9f}}
    };
 
-   for (USize i = 0; i < 9; ++i) {
-       auto slotPanel = uiManager.CreatePanel();
+   for (USize i{}; i < items.size(); ++i) {
+       auto slotPanel{uiManager.CreatePanel()};
        slotPanel->SetSizeDelta({44.0f, 44.0f});
        std::static_pointer_cast<UIPanel>(slotPanel)->SetBackgroundColor(Color{0.15f, 0.15f, 0.15f, 0.9f});
        std::static_pointer_cast<UIPanel>(slotPanel)->SetBorderWidth(2.0f);
        std::static_pointer_cast<UIPanel>(slotPanel)->SetBorderColor(Color{0.3f, 0.3f, 0.3f, 1.0f});
 
-       auto iconPanel = uiManager.CreatePanel();
+       auto iconPanel{uiManager.CreatePanel()};
        iconPanel->SetAnchor(AnchorPreset::Center);
        iconPanel->SetPivot({0.5f, 0.5f});
        iconPanel->SetSizeDelta({32.0f, 32.0f});
-
-       Color blockColor{0.5f, 0.5f, 0.5f, 1.0f};
-       if (i < blockData.size()) {
-           switch (blockData[i].first) {
-               case BlockType::Dirt: blockColor = Color{0.52f, 0.37f, 0.26f, 1.0f}; break;
-               case BlockType::Grass: blockColor = Color{0.37f, 0.62f, 0.21f, 1.0f}; break;
-               case BlockType::Stone: blockColor = Color{0.5f, 0.5f, 0.5f, 1.0f}; break;
-               case BlockType::Wood: blockColor = Color{0.64f, 0.42f, 0.2f, 1.0f}; break;
-               case BlockType::Leaves: blockColor = Color{0.2f, 0.6f, 0.2f, 0.9f}; break;
-               case BlockType::Sand: blockColor = Color{0.9f, 0.8f, 0.5f, 1.0f}; break;
-               case BlockType::Glass: blockColor = Color{0.7f, 0.9f, 1.0f, 0.4f}; break;
-               case BlockType::Brick: blockColor = Color{0.6f, 0.25f, 0.15f, 1.0f}; break;
-               case BlockType::Water: blockColor = Color{0.2f, 0.4f, 0.8f, 0.7f}; break;
-           }
-       }
-       std::static_pointer_cast<UIPanel>(iconPanel)->SetBackgroundColor(blockColor);
+       std::static_pointer_cast<UIPanel>(iconPanel)->SetBackgroundColor(items[i].color);
        slotPanel->AddChild(iconPanel);
 
-       auto countText = uiManager.CreateText("64");
+       auto countText{uiManager.CreateText("64")};
        countText->SetAnchor(AnchorPreset::BottomRight);
        countText->SetPivot({1.0f, 1.0f});
        countText->SetAnchoredPosition({-2.0f, -2.0f});
@@ -204,7 +179,7 @@ int main() {
        std::static_pointer_cast<UIText>(countText)->SetAlignment(Alignment::End, Alignment::End);
        slotPanel->AddChild(countText);
 
-       auto selectionBorder = uiManager.CreatePanel();
+       auto selectionBorder{uiManager.CreatePanel()};
        selectionBorder->SetAnchor(AnchorPreset::StretchAll);
        selectionBorder->SetMargin(Margin{-2.0f});
        std::static_pointer_cast<UIPanel>(selectionBorder)->SetBackgroundColor(Color::Transparent);
@@ -220,7 +195,7 @@ int main() {
        slot.icon = iconPanel;
        slot.countText = countText;
        slot.selectionBorder = selectionBorder;
-       slot.blockType = i < blockData.size() ? blockData[i].first : BlockType::Dirt;
+       slot.voxel = items[i].v;
        slot.count = 64;
        hotbarSlots.push_back(slot);
    }
@@ -229,7 +204,7 @@ int main() {
        constexpr F32 kSlot{44.0f};
        constexpr F32 kBaseSpacing{5.0f};
        constexpr F32 kBasePadding{5.0f};
-       constexpr U32 kCount{9};
+       U32 kCount{static_cast<U32>(hotbarSlots.size())};
        F32 baseW = kCount * kSlot + (kCount - 1) * kBaseSpacing + 2.0f * kBasePadding;
        F32 maxW = std::max(0.0f, static_cast<F32>(w) - 40.0f);
        F32 scale = std::min(1.0f, maxW / baseW);
@@ -241,7 +216,6 @@ int main() {
        hotbarContainer->SetSizeDelta({contW, contH});
        hotbarLayout->SetMargin(Margin{padding});
        std::static_pointer_cast<UIHorizontalLayout>(hotbarLayout)->SetSpacing(spacing);
-       assert(hotbarSlots.size() == kCount, "hotbarSlots size mismatch");
        for (auto& s : hotbarSlots) {
            std::static_pointer_cast<UIPanel>(s.panel)->SetBorderWidth(2.0f * scale);
            s.panel->SetSizeDelta({slot, slot});
@@ -300,7 +274,6 @@ int main() {
     auto chunkText = uiManager.CreateText("Chunks: 0");
     sized(chunkText, 16.0f); v->AddChild(chunkText);
 
-
    windowInput.SetResizeCallback([&graphics, &uiManager, &updateHotbar](U32 w, U32 h) {
        if (w > 0 && h > 0) {
            graphics->OnResize(w, h);
@@ -350,6 +323,18 @@ int main() {
    F32 fpsTimer{0.0f};
    U32 currentFPS{60};
 
+   U32 selectedSlot{0};
+
+   auto applySelection = [&](U32 newIdx) {
+       auto* hbp = world.GetComponent<VoxelHotbarState>(hotbarStateEntity);
+       assert(hbp != nullptr, "Missing VoxelHotbarState");
+       hotbarSlots[selectedSlot].selectionBorder->SetVisibility(Visibility::Hidden);
+       selectedSlot = newIdx;
+       hotbarSlots[selectedSlot].selectionBorder->SetVisibility(Visibility::Visible);
+       hbp->selectedIndex = selectedSlot;
+       hbp->selected = hotbarSlots[selectedSlot].voxel;
+   };
+
    orchestrator.SetPreFrameCallback([&](EngineOrchestrator::FrameData &frame) {
        frameTime = static_cast<F32>(frame.deltaTime);
        frameCount++;
@@ -387,25 +372,22 @@ int main() {
            window.RequestClose();
        }
 
-       for (S32 i = 0; i < 9; ++i) {
+       U32 count{static_cast<U32>(hotbarSlots.size())};
+       assert(count > 0, "Hotbar must have slots");
+
+       for (U32 i{}; i < count; ++i) {
            if (inputManager.IsKeyJustPressed(static_cast<Key>(static_cast<U16>(Key::Num1) + i))) {
-               hotbarSlots[selectedSlot].selectionBorder->SetVisibility(Visibility::Hidden);
-               selectedSlot = i;
-               selectedBlock = hotbarSlots[i].blockType;
-               hotbarSlots[selectedSlot].selectionBorder->SetVisibility(Visibility::Visible);
+               applySelection(i);
            }
        }
 
-       F32 scroll = inputManager.GetMouseScroll().second;
+       F32 scroll = static_cast<F32>(inputManager.GetMouseScroll().second);
        if (scroll != 0.0f) {
-           hotbarSlots[selectedSlot].selectionBorder->SetVisibility(Visibility::Hidden);
            if (scroll > 0) {
-               selectedSlot = (selectedSlot + 1) % 9;
+               applySelection((selectedSlot + 1) % count);
            } else {
-               selectedSlot = (selectedSlot + 8) % 9;
+               applySelection((selectedSlot + count - 1) % count);
            }
-           selectedBlock = hotbarSlots[selectedSlot].blockType;
-           hotbarSlots[selectedSlot].selectionBorder->SetVisibility(Visibility::Visible);
        }
 
        if (inputManager.IsKeyJustPressed(Key::F3)) {

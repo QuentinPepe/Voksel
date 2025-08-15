@@ -53,6 +53,12 @@ export struct VoxelRenderResources {
     U32 pipeline{INVALID_INDEX};
 };
 
+export struct VoxelHotbarState {
+    Vector<Voxel> slots{};
+    U32 selectedIndex{0};
+    Voxel selected{Voxel::Dirt};
+};
+
 export template<>
 struct ComponentTypeID<VoxelWorldConfig> {
     static consteval ComponentID value() { return VoxelWorldConfig_ID; }
@@ -71,6 +77,11 @@ struct ComponentTypeID<VoxelMesh> {
 export template<>
 struct ComponentTypeID<VoxelRenderResources> {
     static consteval ComponentID value() { return VoxelRenderResources_ID; }
+};
+
+export template<>
+struct ComponentTypeID<VoxelHotbarState> {
+    static consteval ComponentID value() { return VoxelHotbarState_ID; }
 };
 
 export inline USize VoxelIndex(U32 x, U32 y, U32 z) {

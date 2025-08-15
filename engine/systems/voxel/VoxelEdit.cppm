@@ -116,7 +116,13 @@ public:
         if (!sel.valid) return;
 
         if (doBreak) { detail::SetVoxel(world, sel.gx, sel.gy, sel.gz, Voxel::Air); }
-        if (doPlace) { detail::SetVoxel(world, sel.pgx, sel.pgy, sel.pgz, Voxel::Dirt); }
+        if (doPlace) {
+            Voxel place{Voxel::Dirt};
+            if (auto* st = world->GetStorage<VoxelHotbarState>()) {
+                for (auto [h, hb] : *st) { place = hb.selected; break; }
+            }
+            detail::SetVoxel(world, sel.pgx, sel.pgy, sel.pgz, place);
+        }
     }
 
 private:
