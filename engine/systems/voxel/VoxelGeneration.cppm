@@ -179,7 +179,7 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
                             for (U32 h{}; h < tree.height; ++h) {
                                 S32 ty{tree.y + static_cast<S32>(h)};
                                 if (ty >= 0 && ty < static_cast<S32>(NY)) {
-                                    blocks[VoxelIndex(tree.x, ty, tree.z)] = (Voxel::Grass);
+                                    blocks[VoxelIndex(tree.x, ty, tree.z)] = (Voxel::Log);
                                 }
                             }
 
@@ -214,7 +214,7 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
                                         // Don't overwrite wood
                                         U32 idx = static_cast<U32>(VoxelIndex(lx, ly, lz));
                                         if (blocks[idx] == Voxel::Air) {
-                                            blocks[idx] = (Voxel::Stone);
+                                            blocks[idx] = (Voxel::Leaves);
                                         }
                                     }
                                 }
