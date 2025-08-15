@@ -28,18 +28,35 @@ namespace detail {
 
 namespace {
     enum Face : U32 { NX, PX, NY, PY, NZ, PZ };
-    struct MaterialDef { U32 face[6]; };
+    struct MaterialDef { std::array<U32, 6> face; };
 
     constexpr U32 TILE_DIRT{0u};
     constexpr U32 TILE_GRASS_SIDE{1u};
     constexpr U32 TILE_GRASS_TOP{2u};
     constexpr U32 TILE_STONE{3u};
+    constexpr U32 TILE_LOG{4u};
+    constexpr U32 TILE_LOG_TOP{5u};
+    constexpr U32 TILE_LEAVES{6u};
+
+    constexpr std::array<U32, 6> MakeBlock(U32 tile) {
+        return {tile, tile, tile, tile, tile, tile};
+    }
+
+    constexpr std::array<U32, 6> MakeBlock(U32 tile, U32 tileTopAndBottom) {
+        return {tile, tile, tileTopAndBottom, tileTopAndBottom, tile, tile};
+    }
+
+    constexpr std::array<U32, 6> MakeBlock(U32 tileTop, U32 tileBottom, U32 tileSide) {
+        return {tileSide, tileSide, tileBottom, tileTop, tileSide, tileSide};
+    }
 
     constexpr MaterialDef kMatLUT[]{
         {{0,0,0,0,0,0}},
-        {{TILE_DIRT,TILE_DIRT,TILE_DIRT,TILE_DIRT,TILE_DIRT,TILE_DIRT}},
-        {{TILE_GRASS_SIDE,TILE_GRASS_SIDE,TILE_DIRT,TILE_GRASS_TOP,TILE_GRASS_SIDE,TILE_GRASS_SIDE}},
-        {{TILE_STONE,TILE_STONE,TILE_STONE,TILE_STONE,TILE_STONE,TILE_STONE}},
+        {MakeBlock(TILE_DIRT)},
+        {{MakeBlock(TILE_GRASS_TOP, TILE_DIRT, TILE_GRASS_SIDE)}},
+        {{MakeBlock(TILE_STONE)}},
+        {{MakeBlock(TILE_LOG, TILE_LOG_TOP)}},
+        {{MakeBlock(TILE_LEAVES)}},
     };
 
     inline U32 FaceOf(S32 axis, bool back) {

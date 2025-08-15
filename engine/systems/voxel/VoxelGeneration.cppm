@@ -74,6 +74,11 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
         Vector<Voxel> blocks;
     };
 
+    struct TreeCandidate {
+        S32 x, y, z;
+        U32 height;
+    };
+
     static inline Vector<std::thread> s_Workers{};
     static inline std::mutex s_Mutex{};
     static inline std::condition_variable s_CV{};
@@ -106,12 +111,17 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
                         const F32 hBase{12.0f};
                         const F32 hAmp{10.0f};
 
+                        // First pass: generate terrain
+                        Vector<S32> heightMap{};
+                        heightMap.resize(NX * NZ);
+
                         for (U32 z{}; z < NZ; ++z) {
                             for (U32 x{}; x < NX; ++x) {
                                 F32 wx{job.origin.x + static_cast<F32>(x) * job.bs};
                                 F32 wz{job.origin.z + static_cast<F32>(z) * job.bs};
                                 F32 n{noise::fbm2D(wx * freq, wz * freq, 4u, 0.5f, 2.0f)};
                                 S32 h{static_cast<S32>(hBase + n * hAmp)};
+                                heightMap[x + z * NX] = h;
 
                                 for (U32 y{}; y < NY; ++y) {
                                     S32 gy{job.cy * static_cast<S32>(NY) + static_cast<S32>(y)};
@@ -120,6 +130,93 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
                                     else if (gy < h - 1) v = Voxel::Dirt;
                                     else if (gy == h - 1) v = Voxel::Grass;
                                     blocks[VoxelIndex(x, y, z)] = v;
+                                }
+                            }
+                        }
+
+                        // Second pass: place trees using Minecraft algorithm
+                        Vector<TreeCandidate> trees{};
+
+                        // Tree generation probability grid (similar to Minecraft's approach)
+                        for (U32 z{4}; z < NZ - 4; z += 4) {
+                            for (U32 x{4}; x < NX - 4; x += 4) {
+                                F32 wx{job.origin.x + static_cast<F32>(x) * job.bs};
+                                F32 wz{job.origin.z + static_cast<F32>(z) * job.bs};
+
+                                // Use noise for tree placement probability
+                                U32 seed{noise::wang(static_cast<U32>(wx * 73) ^ static_cast<U32>(wz * 97))};
+                                F32 treeChance{static_cast<F32>(seed % 100) / 100.0f};
+
+                                if (treeChance < 0.05f) { // 5% chance per grid cell
+                                    // Add some randomness to position within grid cell
+                                    S32 offsetX{static_cast<S32>(seed % 5) - 2};
+                                    S32 offsetZ{static_cast<S32>((seed >> 8) % 5) - 2};
+                                    S32 treeX{static_cast<S32>(x) + offsetX};
+                                    S32 treeZ{static_cast<S32>(z) + offsetZ};
+
+                                    if (treeX >= 2 && treeX < static_cast<S32>(NX) - 2 &&
+                                        treeZ >= 2 && treeZ < static_cast<S32>(NZ) - 2) {
+
+                                        S32 groundHeight{heightMap[treeX + treeZ * NX]};
+                                        S32 treeY{groundHeight - job.cy * static_cast<S32>(NY)};
+
+                                        // Check if tree base is in this chunk and on grass
+                                        if (treeY >= 0 && treeY < static_cast<S32>(NY)) {
+                                            if (blocks[VoxelIndex(treeX, treeY - 1, treeZ)] == Voxel::Grass) {
+                                                // Random tree height between 4-6 blocks (Minecraft oak tree)
+                                                U32 treeHeight{4u + (seed >> 16) % 3u};
+                                                trees.push_back(TreeCandidate{treeX, treeY, treeZ, treeHeight});
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Place trees
+                        for (auto const& tree : trees) {
+                            // Place trunk
+                            for (U32 h{}; h < tree.height; ++h) {
+                                S32 ty{tree.y + static_cast<S32>(h)};
+                                if (ty >= 0 && ty < static_cast<S32>(NY)) {
+                                    blocks[VoxelIndex(tree.x, ty, tree.z)] = (Voxel::Log);
+                                }
+                            }
+
+                            // Place leaves (Minecraft oak tree pattern)
+                            S32 leavesStart{tree.y + static_cast<S32>(tree.height) - 3};
+                            S32 leavesEnd{tree.y + static_cast<S32>(tree.height) + 1};
+
+                            for (S32 ly{leavesStart}; ly <= leavesEnd; ++ly) {
+                                if (ly < 0 || ly >= static_cast<S32>(NY)) continue;
+
+                                // Determine radius based on height in leaves
+                                S32 radius{2};
+                                if (ly == leavesEnd || ly == leavesEnd - 1) {
+                                    radius = 1; // Smaller radius at top
+                                }
+
+                                for (S32 dx{-radius}; dx <= radius; ++dx) {
+                                    for (S32 dz{-radius}; dz <= radius; ++dz) {
+                                        S32 lx{tree.x + dx};
+                                        S32 lz{tree.z + dz};
+
+                                        if (lx < 0 || lx >= static_cast<S32>(NX) ||
+                                            lz < 0 || lz >= static_cast<S32>(NZ)) continue;
+
+                                        // Skip corners for more natural shape
+                                        if (radius == 2 && std::abs(dx) == 2 && std::abs(dz) == 2) {
+                                            // Random chance to place corner leaves
+                                            U32 cornerSeed{noise::wang(static_cast<U32>(lx * 31 + ly * 37 + lz * 41))};
+                                            if ((cornerSeed % 100) > 40) continue; // 60% chance to skip corners
+                                        }
+
+                                        // Don't overwrite wood
+                                        U32 idx = static_cast<U32>(VoxelIndex(lx, ly, lz));
+                                        if (blocks[idx] == Voxel::Air) {
+                                            blocks[idx] = (Voxel::Leaves);
+                                        }
+                                    }
                                 }
                             }
                         }
