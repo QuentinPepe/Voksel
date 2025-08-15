@@ -115,6 +115,12 @@ public:
         return std::make_shared<UIScrollView>();
     }
 
+    UIElementPtr CreateImage(const std::string& name = "") {
+        auto img = std::make_shared<UIImage>();
+        img->SetName(name);
+        return img;
+    }
+
     UIElementPtr FindElement(const std::string& name) {
         return m_Root->FindChildRecursive(name);
     }

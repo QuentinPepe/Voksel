@@ -217,6 +217,16 @@ public:
             ac.atlasW = atlasW;
             ac.atlasH = atlasH;
             m_Gfx->UpdateConstantBuffer(m_AtlasCB, &ac, sizeof(ac));
+
+            VoxelAtlasInfo ai{};
+            ai.texture = m_AtlasTex; ai.tilesX = tilesX; ai.tileSize = tile; ai.pad = pad; ai.atlasW = atlasW; ai.atlasH = atlasH;
+            auto* storeAI{world->GetStorage<VoxelAtlasInfo>()};
+            if (!storeAI || storeAI->Size()==0){
+                auto e{world->CreateEntity()};
+                world->AddComponent(e, ai);
+            } else {
+                for (auto [h,c] : *storeAI){ world->AddOrReplaceComponent(h, ai); break; }
+            }
         }
 
         CameraConstants cam{};

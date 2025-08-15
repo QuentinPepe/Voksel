@@ -28,6 +28,7 @@ private:
     Math::Vec2 m_ScreenSize{1280.0f, 720.0f};
     std::shared_ptr<UIFont> m_Font{};
     U32 m_WhiteTex{INVALID_INDEX};
+    U32 m_CurrentTexture{INVALID_INDEX};
 
 public:
     explicit UIRenderer(IGraphicsContext* graphics) : m_Graphics{graphics} {
@@ -41,24 +42,15 @@ public:
     void BeginFrame() {
         m_Vertices.clear();
         m_Indices.clear();
+        m_CurrentTexture = INVALID_INDEX;
     }
 
     void EndFrame() {
-        if (m_Vertices.empty()) return;
-        UpdateBuffers();
-        struct UIConstants { Math::Mat4 projection; } constants{};
-        constants.projection = Math::Mat4::Orthographic(0, m_ScreenSize.x, m_ScreenSize.y, 0, -1, 1);
-        m_Graphics->UpdateConstantBuffer(m_ConstantBuffer, &constants, sizeof(constants));
-        m_Graphics->SetPipeline(m_Pipeline);
-        m_Graphics->SetVertexBuffer(m_VertexBuffer);
-        m_Graphics->SetIndexBuffer(m_IndexBuffer);
-        m_Graphics->SetConstantBuffer(m_ConstantBuffer, 0);
-        if (m_Font) m_Graphics->SetTexture(m_Font->GetTexture(), 0);
-        else m_Graphics->SetTexture(m_WhiteTex, 0);
-        m_Graphics->DrawIndexed(static_cast<U32>(m_Indices.size()));
+        Flush();
     }
 
     void DrawRect(const Rect& rect, const Color& color) {
+        BindTexture(m_WhiteTex);
         U32 base = static_cast<U32>(m_Vertices.size());
         U32 col = color.ToRGBA();
         Math::Vec2 uv{-1.0f, -1.0f};
@@ -79,6 +71,7 @@ public:
     void DrawText(const std::string& text, const Rect& r, U32 fontSize, const Color& color,
                   Alignment hAlign, Alignment vAlign) {
         if (!m_Font) return;
+        BindTexture(m_Font->GetTexture());
         F32 px{static_cast<F32>(fontSize)};
         auto size{m_Font->MeasureText(text, px)};
         Math::Vec2 pos{r.position};
@@ -127,6 +120,17 @@ public:
         DrawText(text, r, fontSize, color, Alignment::Start, Alignment::Start);
     }
 
+    void DrawImage(const Rect& rect, U32 texture, const Math::Vec4& uv01, const Color& tint = Color::White) {
+        BindTexture(texture);
+        U32 base = static_cast<U32>(m_Vertices.size());
+        U32 col = tint.ToRGBA();
+        m_Vertices.push_back({{rect.Left(),  rect.Top()},    {uv01.x, uv01.y}, col});
+        m_Vertices.push_back({{rect.Right(), rect.Top()},    {uv01.z, uv01.y}, col});
+        m_Vertices.push_back({{rect.Right(), rect.Bottom()}, {uv01.z, uv01.w}, col});
+        m_Vertices.push_back({{rect.Left(),  rect.Bottom()}, {uv01.x, uv01.w}, col});
+        m_Indices.insert(m_Indices.end(), {base+0,base+1,base+2, base+0,base+2,base+3});
+    }
+
     void SetFont(std::shared_ptr<UIFont> font) { m_Font = std::move(font); }
     IGraphicsContext* GetGraphics() { return m_Graphics; }
 
@@ -162,8 +166,8 @@ private:
             SamplerState gSamp : register(s0);
             struct PSInput { float4 position:SV_Position; float2 uv:TEXCOORD; float4 color:COLOR; };
             float4 PSMain(PSInput i):SV_Target{
-                float a = (i.uv.x < 0.0) ? 1.0 : gTex.Sample(gSamp, i.uv).a;
-                return float4(i.color.rgb, i.color.a * a);
+                float4 tex = (i.uv.x < 0.0) ? float4(1,1,1,1) : gTex.Sample(gSamp, i.uv);
+                return tex * i.color;
             }
         )";
         ps.entryPoint = "PSMain";
@@ -193,6 +197,31 @@ private:
             m_IndexBuffer = m_Graphics->CreateIndexBuffer(m_Indices.data(), m_Indices.size() * sizeof(U32));
         }
     }
+
+    void Flush() {
+        if (m_Vertices.empty()) return;
+        UpdateBuffers();
+        struct UIConstants { Math::Mat4 projection; } constants{};
+        constants.projection = Math::Mat4::Orthographic(0, m_ScreenSize.x, m_ScreenSize.y, 0, -1, 1);
+        m_Graphics->UpdateConstantBuffer(m_ConstantBuffer, &constants, sizeof(constants));
+        m_Graphics->SetPipeline(m_Pipeline);
+        m_Graphics->SetVertexBuffer(m_VertexBuffer);
+        m_Graphics->SetIndexBuffer(m_IndexBuffer);
+        m_Graphics->SetConstantBuffer(m_ConstantBuffer, 0);
+        if (m_CurrentTexture == INVALID_INDEX) m_CurrentTexture = m_WhiteTex;
+        m_Graphics->SetTexture(m_CurrentTexture, 0);
+        m_Graphics->DrawIndexed(static_cast<U32>(m_Indices.size()));
+        m_Vertices.clear();
+        m_Indices.clear();
+    }
+
+    void BindTexture(U32 tex) {
+        if (tex == INVALID_INDEX) tex = m_WhiteTex;
+        if (m_CurrentTexture != tex) {
+            Flush();
+            m_CurrentTexture = tex;
+        }
+    }
 };
 
 void UIPanel::OnDraw(UIRenderer* renderer) {
@@ -204,4 +233,10 @@ void UIPanel::OnDraw(UIRenderer* renderer) {
 
 void UIText::OnDraw(UIRenderer* renderer) {
     renderer->DrawText(m_Text, m_WorldRect, m_FontSize, m_TextColor, m_HorizontalAlign, m_VerticalAlign);
+}
+
+void UIImage::OnDraw(UIRenderer* renderer) {
+    if (m_Texture != INVALID_INDEX) {
+        renderer->DrawImage(m_WorldRect, m_Texture, m_UV, m_Tint);
+    }
 }
