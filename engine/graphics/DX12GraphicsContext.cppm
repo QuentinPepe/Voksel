@@ -31,7 +31,6 @@ using Microsoft::WRL::ComPtr;
 
 struct ResourceHandle {
     enum Type { VertexBuffer, IndexBuffer, Pipeline } type;
-
     U32 index;
 };
 
@@ -141,9 +140,9 @@ public:
                 b1.Transition.pResource = buffer->GetResource();
                 b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
                 b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-                b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+                b1.Transition.StateAfter = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
                 cmd->ResourceBarrier(1, &b1);
-                buffer->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+                buffer->SetCurrentState(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
 
                 curCL.KeepAlive(upload);
             } else {
@@ -174,9 +173,9 @@ public:
                 b1.Transition.pResource = buffer->GetResource();
                 b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
                 b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-                b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+                b1.Transition.StateAfter = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
                 cmd->ResourceBarrier(1, &b1);
-                buffer->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+                buffer->SetCurrentState(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
 
                 assert(SUCCEEDED(cmd->Close()), "close");
                 ID3D12CommandList *lists[]{cmd.Get()};
@@ -199,7 +198,6 @@ public:
         m_VertexBuffers.push_back(std::move(buffer));
         return handle;
     }
-
 
     U32 CreateIndexBuffer(const void* data, U64 size) override {
         BufferDesc desc{};
@@ -253,9 +251,9 @@ public:
                 b1.Transition.pResource = buffer->GetResource();
                 b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
                 b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-                b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+                b1.Transition.StateAfter = D3D12_RESOURCE_STATE_INDEX_BUFFER;
                 cmd->ResourceBarrier(1, &b1);
-                buffer->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+                buffer->SetCurrentState(D3D12_RESOURCE_STATE_INDEX_BUFFER);
 
                 curCL.KeepAlive(upload);
             } else {
@@ -282,9 +280,9 @@ public:
                 b1.Transition.pResource = buffer->GetResource();
                 b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
                 b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-                b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+                b1.Transition.StateAfter = D3D12_RESOURCE_STATE_INDEX_BUFFER;
                 cmd->ResourceBarrier(1, &b1);
-                buffer->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+                buffer->SetCurrentState(D3D12_RESOURCE_STATE_INDEX_BUFFER);
 
                 assert(SUCCEEDED(cmd->Close()), "close");
                 ID3D12CommandList* lists[]{cmd.Get()};
@@ -400,8 +398,8 @@ public:
         GraphicsPipelineDesc pd{};
         for (auto const &sh: info.shaders) {
             std::string target{};
-            if (sh.stage == ShaderStage::Vertex) target = "vs_5_0";
-            else if (sh.stage == ShaderStage::Pixel) target = "ps_5_0";
+            if (sh.stage == ShaderStage::Vertex) target = "vs_5_1";
+            else if (sh.stage == ShaderStage::Pixel) target = "ps_5_1";
             else assert(false, "Unsupported stage");
 
             ShaderBytecode bc{};
@@ -474,13 +472,10 @@ public:
         m_InRenderPass = false;
         auto passData{std::make_shared<FramePassData>(std::move(*m_CurrentPassData))};
         m_CurrentPassData = std::make_unique<FramePassData>();
-
-        struct _NoPassData {
-        };
+        struct _NoPassData {};
         m_Renderer->GetRenderGraph().AddPass<_NoPassData>(
             passData->passInfo.name,
-            [](RenderGraphBuilder &, _NoPassData &) {
-            },
+            [](RenderGraphBuilder &, _NoPassData &) {},
             [this, passData](const RenderGraphResources &, CommandList &cmdList, const _NoPassData &) {
                 ExecuteRenderPass(cmdList, *passData);
             }
@@ -736,6 +731,12 @@ private:
         upload->Unmap(0, nullptr);
 
         auto& curCL{m_Renderer->GetCurrentCommandList()};
+        auto const u{dst.GetDesc().usage};
+        auto FinalState = D3D12_RESOURCE_STATE_GENERIC_READ;
+        if (static_cast<U32>(u & ResourceUsage::VertexBuffer)) FinalState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+        else if (static_cast<U32>(u & ResourceUsage::IndexBuffer)) FinalState = D3D12_RESOURCE_STATE_INDEX_BUFFER;
+        else if (static_cast<U32>(u & ResourceUsage::ConstantBuffer)) FinalState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+
         if (curCL.IsRecording()) {
             auto* cmd{curCL.GetCommandList()};
 
@@ -755,9 +756,9 @@ private:
             b1.Transition.pResource = dst.GetResource();
             b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
             b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-            b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+            b1.Transition.StateAfter = FinalState;
             cmd->ResourceBarrier(1, &b1);
-            dst.SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+            dst.SetCurrentState(FinalState);
 
             curCL.KeepAlive(upload);
         } else {
@@ -784,9 +785,9 @@ private:
             b1.Transition.pResource = dst.GetResource();
             b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
             b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-            b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+            b1.Transition.StateAfter = FinalState;
             cmd->ResourceBarrier(1, &b1);
-            dst.SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+            dst.SetCurrentState(FinalState);
 
             assert(SUCCEEDED(cmd->Close()), "close");
             ID3D12CommandList* lists[]{cmd.Get()};

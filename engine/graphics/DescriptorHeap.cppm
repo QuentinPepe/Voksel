@@ -16,7 +16,6 @@ export struct DescriptorHandle {
     D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = {0};
     D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = {0};
     bool isValid = false;
-
     operator bool() const { return isValid; }
 };
 
@@ -28,25 +27,20 @@ private:
     U32 m_MaxDescriptors;
     U32 m_CurrentOffset = 0;
     bool m_IsShaderVisible;
-
     D3D12_CPU_DESCRIPTOR_HANDLE m_CpuStart;
     D3D12_GPU_DESCRIPTOR_HANDLE m_GpuStart;
 
 public:
     DescriptorHeap(Device& device, D3D12_DESCRIPTOR_HEAP_TYPE type, U32 maxDescriptors, bool shaderVisible = false)
         : m_Type{type}, m_MaxDescriptors{maxDescriptors}, m_IsShaderVisible{shaderVisible} {
-
         D3D12_DESCRIPTOR_HEAP_DESC desc = {};
         desc.Type = type;
         desc.NumDescriptors = maxDescriptors;
         desc.Flags = shaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
         desc.NodeMask = 0;
-
         assert(SUCCEEDED(device.GetDevice()->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_Heap))), "Failed to create descriptor heap");
-
         m_DescriptorSize = device.GetDevice()->GetDescriptorHandleIncrementSize(type);
         m_CpuStart = m_Heap->GetCPUDescriptorHandleForHeapStart();
-
         if (shaderVisible) {
             m_GpuStart = m_Heap->GetGPUDescriptorHandleForHeapStart();
         }
@@ -54,17 +48,13 @@ public:
 
     DescriptorHandle Allocate() {
         assert(m_CurrentOffset < m_MaxDescriptors, "Descriptor heap is full");
-
         DescriptorHandle handle;
         handle.cpuHandle.ptr = m_CpuStart.ptr + static_cast<SIZE_T>(m_CurrentOffset) * m_DescriptorSize;
-
         if (m_IsShaderVisible) {
             handle.gpuHandle.ptr = m_GpuStart.ptr + static_cast<UINT64>(m_CurrentOffset) * m_DescriptorSize;
         }
-
         handle.isValid = true;
         m_CurrentOffset++;
-
         return handle;
     }
 
@@ -75,12 +65,12 @@ public:
     [[nodiscard]] ID3D12DescriptorHeap* GetHeap() const { return m_Heap.Get(); }
     [[nodiscard]] U32 GetDescriptorSize() const { return m_DescriptorSize; }
     [[nodiscard]] bool IsShaderVisible() const { return m_IsShaderVisible; }
+    [[nodiscard]] bool HasSpace() const { return m_CurrentOffset < m_MaxDescriptors; }
 };
 
 export class DynamicDescriptorHeap {
 private:
     static constexpr U32 DESCRIPTORS_PER_HEAP = 1024;
-
     Device* m_Device;
     D3D12_DESCRIPTOR_HEAP_TYPE m_Type;
     Vector<std::unique_ptr<DescriptorHeap>> m_Heaps;
@@ -94,14 +84,10 @@ public:
 
     DescriptorHandle Allocate() {
         auto& currentHeap = m_Heaps[m_CurrentHeapIndex];
-
-        try {
-            return currentHeap->Allocate();
-        } catch (...) {
-            // Current heap is full, allocate new one
+        if (!currentHeap->HasSpace()) {
             AllocateNewHeap();
-            return m_Heaps[m_CurrentHeapIndex]->Allocate();
         }
+        return m_Heaps[m_CurrentHeapIndex]->Allocate();
     }
 
     void Reset() {
@@ -119,7 +105,6 @@ private:
     void AllocateNewHeap() {
         bool shaderVisible = (m_Type == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV ||
                              m_Type == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
-
         m_Heaps.emplace_back(std::make_unique<DescriptorHeap>(*m_Device, m_Type, DESCRIPTORS_PER_HEAP, shaderVisible));
         m_CurrentHeapIndex = static_cast<U32>(m_Heaps.size() - 1);
     }

@@ -47,6 +47,7 @@ public:
     Renderer(Window &window, const RendererConfig &config)
         : m_Device{config.deviceConfig}
         , m_SwapChain{m_Device, window, config.swapChainConfig} {
+        assert(config.swapChainConfig.bufferCount == FRAME_COUNT, "FRAME_COUNT must equal swapchain bufferCount");
         m_RtvHeap = std::make_unique<DescriptorHeap>(m_Device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 32);
         m_DsvHeap = std::make_unique<DescriptorHeap>(m_Device, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 8);
         m_CbvSrvUavHeap = std::make_unique<DynamicDescriptorHeap>(m_Device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);

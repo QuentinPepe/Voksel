@@ -134,6 +134,9 @@ public:
         }
     }
 
+    Buffer(ID3D12Resource* resource, D3D12_RESOURCE_STATES state, BufferDesc const& desc)
+        : Resource{resource, state, ResourceType::Buffer}, m_Desc{desc} {}
+
     ~Buffer() {
         if (m_MappedData) {
             m_Resource->Unmap(0, nullptr);
@@ -209,6 +212,9 @@ public:
             IID_PPV_ARGS(&m_Resource)
         )), "Failed to create texture");
     }
+
+    Texture(ID3D12Resource* resource, D3D12_RESOURCE_STATES state, TextureDesc const& desc)
+        : Resource{resource, state, GetResourceType(desc.dimension)}, m_Desc{desc} {}
 
     [[nodiscard]] const TextureDesc& GetDesc() const { return m_Desc; }
 
