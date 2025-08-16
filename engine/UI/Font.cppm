@@ -31,21 +31,31 @@ private:
 public:
     UIFont() = default;
 
-    bool LoadFromFile(IGraphicsContext* gfx, const std::string& path, F32 bakePx = 48.0f, U32 atlasW = 1024, U32 atlasH = 1024) {
+    bool LoadFromFile(IGraphicsContext *gfx, const std::string &path, F32 bakePx = 48.0f, U32 atlasW = 1024,
+                      U32 atlasH = 1024) {
         assert(gfx, "null gfx");
         std::ifstream f{path, std::ios::binary | std::ios::ate};
         if (!f) return false;
         auto sz{static_cast<size_t>(f.tellg())};
         f.seekg(0, std::ios::beg);
         m_TTF.resize(sz);
-        f.read(reinterpret_cast<char*>(m_TTF.data()), sz);
+        f.read(reinterpret_cast<char *>(m_TTF.data()), sz);
         return LoadFromMemory(gfx, m_TTF.data(), static_cast<int>(m_TTF.size()), bakePx, atlasW, atlasH);
     }
 
-    bool LoadFromMemory(IGraphicsContext* gfx, const U8* data, int size, F32 bakePx = 48.0f, U32 atlasW = 1024, U32 atlasH = 1024) {
+    bool LoadFromMemory(IGraphicsContext *gfx, const U8 *data, int size, F32 bakePx = 48.0f, U32 atlasW = 1024,
+                        U32 atlasH = 1024) {
         assert(gfx, "null gfx");
         assert(data && size > 0, "invalid font data");
-        assert(stbtt_InitFont(&m_Info, data, stbtt_GetFontOffsetForIndex(data, 0)), "font init failed");
+        assert(bakePx > 0.0f, "invalid bake px");
+        assert(atlasW > 0 && atlasH > 0, "invalid atlas size");
+
+        int offset{stbtt_GetFontOffsetForIndex(data, 0)};
+        if (offset < 0) return false;
+
+        int ok{stbtt_InitFont(&m_Info, data, offset)};
+        assert(ok != 0, "font init failed");
+        if (!ok) return false;
 
         m_BakePx = bakePx;
         m_BakeScale = stbtt_ScaleForPixelHeight(&m_Info, m_BakePx);
@@ -63,12 +73,16 @@ public:
         std::fill(alpha.begin(), alpha.end(), 0);
 
         stbtt_pack_context pc{};
-        assert(stbtt_PackBegin(&pc, alpha.data(), static_cast<int>(m_AtlasW), static_cast<int>(m_AtlasH), 0, 1, nullptr) != 0, "pack begin failed");
+        ok = stbtt_PackBegin(&pc, alpha.data(), static_cast<int>(m_AtlasW), static_cast<int>(m_AtlasH), 0, 1, nullptr);
+        assert(ok != 0, "pack begin failed");
+        if (!ok) return false;
         stbtt_PackSetOversampling(&pc, 3, 3);
 
         m_Packed.resize(Last - First + 1);
-        assert(stbtt_PackFontRange(&pc, m_Info.data, 0, m_BakePx, First, Last - First + 1, m_Packed.data()) != 0, "pack range failed");
+        ok = stbtt_PackFontRange(&pc, m_Info.data, 0, m_BakePx, First, Last - First + 1, m_Packed.data());
+        assert(ok != 0, "pack range failed");
         stbtt_PackEnd(&pc);
+        if (!ok) return false;
 
         m_AtlasRGBA.resize(static_cast<size_t>(m_AtlasW) * m_AtlasH * 4);
         for (U32 y{0}; y < m_AtlasH; ++y) {
@@ -98,14 +112,21 @@ public:
         return static_cast<F32>(k) * m_BakeScale;
     }
 
-    bool GetQuad(U32 codepoint, F32 x, F32 y, F32& x0, F32& y0, F32& x1, F32& y1, F32& u0, F32& v0, F32& u1, F32& v1, F32& xAdvance) const {
+    bool GetQuad(U32 codepoint, F32 x, F32 y, F32 &x0, F32 &y0, F32 &x1, F32 &y1, F32 &u0, F32 &v0, F32 &u1, F32 &v1,
+                 F32 &xAdvance) const {
         U32 cp{codepoint};
         if (cp < First || cp > Last) cp = static_cast<U32>('?');
         stbtt_aligned_quad q{};
         stbtt_GetPackedQuad(m_Packed.data(), static_cast<int>(m_AtlasW), static_cast<int>(m_AtlasH),
                             static_cast<int>(cp - First), &x, &y, &q, 0);
-        x0 = q.x0; y0 = q.y0; x1 = q.x1; y1 = q.y1;
-        u0 = q.s0; v0 = q.t0; u1 = q.s1; v1 = q.t1;
+        x0 = q.x0;
+        y0 = q.y0;
+        x1 = q.x1;
+        y1 = q.y1;
+        u0 = q.s0;
+        v0 = q.t0;
+        u1 = q.s1;
+        v1 = q.t1;
 
         // Approximate advance at bake px
         float advBake{};
@@ -117,7 +138,7 @@ public:
         return true;
     }
 
-    Math::Vec2 MeasureText(const std::string& utf8, F32 px) const {
+    Math::Vec2 MeasureText(const std::string &utf8, F32 px) const {
         F32 s{px / m_BakePx};
         F32 x{0.0f}, y{0.0f};
         F32 maxX{0.0f};
@@ -145,18 +166,26 @@ public:
         return {maxX * s, (y + h) * s};
     }
 
-    static size_t DecodeUTF8(const std::string& s, size_t i, U32& cp) {
+    static size_t DecodeUTF8(const std::string &s, size_t i, U32 &cp) {
         U8 c{static_cast<U8>(s[i])};
-        if ((c & 0x80u) == 0u) { cp = c; return 1; }
+        if ((c & 0x80u) == 0u) {
+            cp = c;
+            return 1;
+        }
         if ((c & 0xE0u) == 0xC0u && i + 1 < s.size()) {
-            cp = ((c & 0x1Fu) << 6) | (static_cast<U8>(s[i + 1]) & 0x3Fu); return 2;
+            cp = ((c & 0x1Fu) << 6) | (static_cast<U8>(s[i + 1]) & 0x3Fu);
+            return 2;
         }
         if ((c & 0xF0u) == 0xE0u && i + 2 < s.size()) {
-            cp = ((c & 0x0Fu) << 12) | ((static_cast<U8>(s[i + 1]) & 0x3Fu) << 6) | (static_cast<U8>(s[i + 2]) & 0x3Fu); return 3;
+            cp = ((c & 0x0Fu) << 12) | ((static_cast<U8>(s[i + 1]) & 0x3Fu) << 6) | (static_cast<U8>(s[i + 2]) & 0x3Fu);
+            return 3;
         }
         if ((c & 0xF8u) == 0xF0u && i + 3 < s.size()) {
-            cp = ((c & 0x07u) << 18) | ((static_cast<U8>(s[i + 1]) & 0x3Fu) << 12) | ((static_cast<U8>(s[i + 2]) & 0x3Fu) << 6) | (static_cast<U8>(s[i + 3]) & 0x3Fu); return 4;
+            cp = ((c & 0x07u) << 18) | ((static_cast<U8>(s[i + 1]) & 0x3Fu) << 12) | (
+                     (static_cast<U8>(s[i + 2]) & 0x3Fu) << 6) | (static_cast<U8>(s[i + 3]) & 0x3Fu);
+            return 4;
         }
-        cp = '?'; return 1;
+        cp = '?';
+        return 1;
     }
 };
