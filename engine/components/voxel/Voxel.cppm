@@ -14,7 +14,9 @@ export enum class Voxel : U8 {
     Grass = 2,
     Stone = 3,
     Log = 4,
-    Leaves = 5
+    Leaves = 5,
+    Sand = 6,
+    Water = 7
 };
 
 export struct VoxelWorldConfig {
