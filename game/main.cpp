@@ -67,7 +67,7 @@ int main() {
 
    GraphicsConfig gc{};
    gc.enableValidation = true;
-   gc.enableVSync = true;
+   gc.enableVSync = false;
 
    auto graphics{CreateGraphicsContext(window, gc)};
    assert(graphics != nullptr, "Graphics creation failed");
@@ -174,6 +174,7 @@ int main() {
    orchestrator.SetWindow(&window);
    orchestrator.SetWorld(&world);
    orchestrator.SetGraphicsContext(graphics.get());
+    orchestrator.SetFrameLimit(144);
 
    EngineOrchestratorECS orchestratorECS{&orchestrator};
    SystemScheduler* scheduler{orchestratorECS.GetSystemScheduler()};

@@ -66,6 +66,7 @@ private:
 
     ProfileData m_ProfileData;
     bool m_ProfilingEnabled{true};
+    U32 m_FrameLimitFPS{0};
 
     std::function<void(FrameData &)> m_PreFrameCallback;
     std::function<void(FrameData &)> m_UpdateCallback;
@@ -101,6 +102,10 @@ public:
     void SetGraphicsContext(IGraphicsContext *graphics) {
         assert(graphics, "Graphics context cannot be null");
         m_Graphics = graphics;
+    }
+
+    void SetFrameLimit(U32 fps) {
+        m_FrameLimitFPS = fps;
     }
 
     void SetPreFrameCallback(std::function<void(FrameData &)> callback) {
@@ -151,10 +156,17 @@ public:
 
         if (m_ProfilingEnabled) {
             TaskProfiler::Get().EndFrame();
-
-            auto frameEnd = std::chrono::high_resolution_clock::now();
-            auto frameTime = std::chrono::duration_cast<std::chrono::microseconds>(
-                frameEnd - frameStart).count();
+            if (m_FrameLimitFPS > 0) {
+                F64 targetSec{1.0 / static_cast<F64>(m_FrameLimitFPS)};
+                auto now0{std::chrono::high_resolution_clock::now()};
+                F64 elapsedSec{std::chrono::duration<F64>(now0 - frameStart).count()};
+                if (elapsedSec < targetSec) {
+                    auto sleepSec{targetSec - elapsedSec};
+                    std::this_thread::sleep_for(std::chrono::duration<F64>{sleepSec});
+                }
+            }
+            auto frameEnd{std::chrono::high_resolution_clock::now()};
+            auto frameTime{std::chrono::duration_cast<std::chrono::microseconds>(frameEnd - frameStart).count()};
             m_ProfileData.AddFrameTime(frameTime);
         }
     }
