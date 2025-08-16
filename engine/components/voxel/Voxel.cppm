@@ -8,7 +8,17 @@ import Math.Vector;
 import Graphics;
 import std;
 
-export enum class Voxel : U8 { Air=0, Dirt=1, Grass=2, Stone=3, Log=4, Leaves=5 };
+export enum class Voxel : U8 {
+    Air = 0,
+    Dirt = 1,
+    Grass = 2,
+    Stone = 3,
+    Log = 4,
+    Leaves = 5,
+    Sand = 6,
+    Water = 7
+};
+
 
 export struct VoxelWorldConfig {
     U32 chunksX{1}; U32 chunksY{1}; U32 chunksZ{1}; F32 blockSize{1.0f};
@@ -79,6 +89,8 @@ export inline U32 AtlasTileFor(Voxel v){
         case Voxel::Stone:  return 3;
         case Voxel::Log:    return 4;
         case Voxel::Leaves: return 6;
+        case Voxel::Sand: return 7;
+        case Voxel::Water: return 8;
         default:            return 0;
     }
 }

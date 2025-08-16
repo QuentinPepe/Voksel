@@ -182,7 +182,8 @@ public:
             const U32 pad{2};
             Vector<std::string> paths{
                 "assets/dirt.png", "assets/grass_side.png", "assets/grass_top.png", "assets/stone.png",
-                "assets/log_oak.png", "assets/log_oak_top.png", "assets/oak_leaves.png"
+                "assets/log_oak.png", "assets/log_oak_top.png", "assets/oak_leaves.png", "assets/sand.png",
+                "assets/water.png"
             };
             Vector<Vector<U32> > imgs{};
             imgs.resize(paths.size());

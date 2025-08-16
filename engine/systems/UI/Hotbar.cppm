@@ -160,8 +160,8 @@ private:
         m_Slots.clear();
         m_Slots.reserve(kTotalSlots);
 
-        constexpr U32 kInitCount{5};
-        constexpr Voxel initVoxels[kInitCount]{Voxel::Dirt, Voxel::Grass, Voxel::Stone, Voxel::Log, Voxel::Leaves};
+        constexpr U32 kInitCount{7};
+        constexpr Voxel initVoxels[kInitCount]{Voxel::Dirt, Voxel::Grass, Voxel::Stone, Voxel::Log, Voxel::Leaves, Voxel::Water, Voxel::Sand};
 
         for (U32 i{}; i < kTotalSlots; ++i) {
             bool has{ i < kInitCount };

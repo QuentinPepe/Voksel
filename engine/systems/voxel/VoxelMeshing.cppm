@@ -36,6 +36,8 @@ namespace {
     constexpr U32 TILE_LOG{4u};
     constexpr U32 TILE_LOG_TOP{5u};
     constexpr U32 TILE_LEAVES{6u};
+    constexpr U32 TILE_SAND{7u};
+    constexpr U32 TILE_WATER{8u};
 
     struct MaterialDef { std::array<U32, 6> face; };
 
@@ -50,6 +52,8 @@ namespace {
         {{MakeBlock(TILE_STONE)}},
         {{MakeBlock(TILE_LOG, TILE_LOG_TOP)}},
         {{MakeBlock(TILE_LEAVES)}},
+        {{MakeBlock(TILE_SAND)}},
+        {{MakeBlock(TILE_WATER)}},
     };
 
     inline U32 FaceOf(S32 axis, bool back) {
