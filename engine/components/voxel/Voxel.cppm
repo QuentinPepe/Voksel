@@ -89,6 +89,8 @@ export inline U32 AtlasTileFor(Voxel v){
         case Voxel::Stone:  return 3;
         case Voxel::Log:    return 4;
         case Voxel::Leaves: return 6;
+        case Voxel::Sand: return 7;
+        case Voxel::Water: return 8;
         default:            return 0;
     }
 }
