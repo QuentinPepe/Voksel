@@ -8,9 +8,13 @@ import Components.Voxel;
 import Components.VoxelStreaming;
 import Systems.CameraManager;
 import Components.Transform;
+import Components.Camera;
 import Core.Types;
 import Core.Assert;
+import Math.Core;
 import Math.Vector;
+import Math.Matrix;
+import Math.Transform;
 import std;
 
 namespace detail {
@@ -69,7 +73,6 @@ namespace {
              | (static_cast<U64>(static_cast<S64>(z) + static_cast<S64>(B)) << 42);
     }
 
-    // key packing: 0 = empty, otherwise (tile+1) | BACK_BIT
     constexpr U32 BACK_BIT{0x80000000u};
     inline U32 PackMask(U32 tile, bool back) { return (tile + 1u) | (back ? BACK_BIT : 0u); }
     inline bool MaskBack(U32 key) { return (key & BACK_BIT) != 0u; }
@@ -109,25 +112,36 @@ public:
         }
 
         Math::Vec3 camPos{};
+        Math::Vec3 camDir{};
+        Math::Frustum fr{};
+        bool haveFrustum{false};
         if (auto h{CameraManager::GetPrimaryCamera()}; h.valid()) {
-            if (auto* t{world->GetComponent<Transform>(h)}) camPos = t->position;
+            if (auto* c{world->GetComponent<Camera>(h)}) { fr.SetFromMatrix(c->viewProjection); haveFrustum = true; }
+            if (auto* t{world->GetComponent<Transform>(h)}) { camPos = t->position; camDir = t->Forward(); }
         }
 
         const F32 sx{cfg->blockSize * static_cast<F32>(VoxelChunk::SizeX)};
         const F32 sy{cfg->blockSize * static_cast<F32>(VoxelChunk::SizeY)};
         const F32 sz{cfg->blockSize * static_cast<F32>(VoxelChunk::SizeZ)};
 
-        struct Item { F32 d2; EntityHandle h; };
+        struct Item { F32 score; EntityHandle h; };
         Vector<Item> dirty{};
         dirty.reserve(chunkStore->Size());
         for (auto [h,c] : *chunkStore) {
             if (!c.dirty || c.generating || c.blocks.size() != kCount) continue;
+            Math::Bounds b{c.origin, c.origin + Math::Vec3{sx, sy, sz}};
+            if (haveFrustum && !fr.Intersects(b)) continue;
             Math::Vec3 center{c.origin.x + 0.5f * sx, c.origin.y + 0.5f * sy, c.origin.z + 0.5f * sz};
-            dirty.push_back(Item{(center - camPos).LengthSquared(), h});
+            Math::Vec3 toC{center - camPos};
+            F32 d2{toC.LengthSquared()};
+            F32 cosA{d2 > 1e-6f ? camDir.Dot(toC.Normalized()) : 1.0f};
+            if (cosA < -0.25f) continue;
+            F32 score{d2 * (2.0f - std::clamp(cosA, -1.0f, 1.0f))};
+            dirty.push_back(Item{score, h});
         }
 
         if (dirty.empty()) return;
-        std::ranges::sort(dirty, {}, &Item::d2);
+        std::ranges::sort(dirty, {}, &Item::score);
 
         U32 left{sc->meshBudget};
         for (auto const& it : dirty) {
@@ -137,6 +151,17 @@ public:
             auto const* chunk{world->GetComponent<VoxelChunk>(it.h)};
             if (!mesh || !chunk || !chunk->dirty) continue;
             assert(chunk->blocks.size() == kCount, "Chunk must be generated");
+
+            bool anySolid{false};
+            for (auto const& v : chunk->blocks) { if (v != Voxel::Air) { anySolid = true; break; } }
+            if (!anySolid) {
+                mesh->cpuVertices.clear();
+                mesh->vertexCount = 0u;
+                mesh->gpuDirty = true;
+                const_cast<VoxelChunk*>(chunk)->dirty = false;
+                --left;
+                continue;
+            }
 
             mesh->cpuVertices.clear();
 
@@ -185,7 +210,6 @@ public:
                 return Math::Vec3{static_cast<F32>(X), static_cast<F32>(Y), static_cast<F32>(Z)};
             };
 
-            // Greedy meshing with packed mask (branch-minimized)
             auto greedyAxis = [&](S32 d) {
                 S32 dims[3]{NX,NY,NZ};
                 S32 u{(d + 1) % 3};
