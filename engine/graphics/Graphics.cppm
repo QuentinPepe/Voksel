@@ -56,6 +56,8 @@ public:
     virtual ~IGraphicsContext() = default;
     virtual U32 CreateVertexBuffer(const void* data, U64 size) = 0;
     virtual U32 CreateIndexBuffer(const void* data, U64 size) = 0;
+    virtual void UpdateVertexBuffer(U32 buffer, const void* data, U64 size, U64 dstOffset = 0) = 0;
+    virtual void UpdateIndexBuffer(U32 buffer, const void* data, U64 size, U64 dstOffset = 0) = 0;
     virtual U32 CreateGraphicsPipeline(const GraphicsPipelineCreateInfo& info) = 0;
     virtual U32 CreateConstantBuffer(U64 size) = 0;
     virtual void UpdateConstantBuffer(U32 buffer, const void* data, U64 size) = 0;

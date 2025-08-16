@@ -23,16 +23,40 @@ private:
     U32 m_VertexBuffer{INVALID_INDEX};
     U32 m_IndexBuffer{INVALID_INDEX};
     U32 m_ConstantBuffer{INVALID_INDEX};
+
+    static constexpr U32 MAX_VERTICES = 65536;
+    static constexpr U32 MAX_INDICES = 98304;
+    static constexpr U32 MAX_DRAW_CALLS = 256;
+
     Vector<UIVertex> m_Vertices;
     Vector<U32> m_Indices;
+
+    struct DrawCall {
+        U32 indexCount;
+        U32 indexOffset;
+        U32 texture;
+    };
+    Vector<DrawCall> m_DrawCalls;
+
     Math::Vec2 m_ScreenSize{1280.0f, 720.0f};
     std::shared_ptr<UIFont> m_Font{};
     U32 m_WhiteTex{INVALID_INDEX};
     U32 m_CurrentTexture{INVALID_INDEX};
 
+    struct VertexCache {
+        Vector<UIVertex> vertices;
+        Vector<U32> indices;
+        bool dirty{true};
+    };
+    UnorderedMap<U32, VertexCache> m_ElementCache;
+    U32 m_FrameCounter{0};
+
 public:
     explicit UIRenderer(IGraphicsContext* graphics) : m_Graphics{graphics} {
         Initialize();
+        m_Vertices.reserve(MAX_VERTICES);
+        m_Indices.reserve(MAX_INDICES);
+        m_DrawCalls.reserve(MAX_DRAW_CALLS);
     }
 
     void SetScreenSize(F32 width, F32 height) {
@@ -42,93 +66,85 @@ public:
     void BeginFrame() {
         m_Vertices.clear();
         m_Indices.clear();
+        m_DrawCalls.clear();
         m_CurrentTexture = INVALID_INDEX;
+        m_FrameCounter++;
     }
 
     void EndFrame() {
-        Flush();
+        if (m_DrawCalls.empty()) return;
+
+        if (!m_Vertices.empty()) {
+            m_Graphics->UpdateVertexBuffer(m_VertexBuffer, m_Vertices.data(),
+                                         m_Vertices.size() * sizeof(UIVertex));
+        }
+        if (!m_Indices.empty()) {
+            m_Graphics->UpdateIndexBuffer(m_IndexBuffer, m_Indices.data(),
+                                        m_Indices.size() * sizeof(U32));
+        }
+
+        struct UIConstants { Math::Mat4 projection; } constants{};
+        constants.projection = Math::Mat4::Orthographic(0, m_ScreenSize.x, m_ScreenSize.y, 0, -1, 1);
+        m_Graphics->UpdateConstantBuffer(m_ConstantBuffer, &constants, sizeof(constants));
+
+        m_Graphics->SetPipeline(m_Pipeline);
+        m_Graphics->SetVertexBuffer(m_VertexBuffer);
+        m_Graphics->SetIndexBuffer(m_IndexBuffer);
+        m_Graphics->SetConstantBuffer(m_ConstantBuffer, 0);
+
+        for (const auto& draw : m_DrawCalls) {
+            if (draw.texture != INVALID_INDEX) {
+                m_Graphics->SetTexture(draw.texture, 0);
+            }
+            m_Graphics->DrawIndexed(draw.indexCount, 1, draw.indexOffset, 0, 0);
+        }
     }
 
     void DrawRect(const Rect& rect, const Color& color) {
-        BindTexture(m_WhiteTex);
-        U32 base = static_cast<U32>(m_Vertices.size());
-        U32 col = color.ToRGBA();
-        Math::Vec2 uv{-1.0f, -1.0f};
-        m_Vertices.push_back({{rect.Left(),  rect.Top()},    uv, col});
-        m_Vertices.push_back({{rect.Right(), rect.Top()},    uv, col});
-        m_Vertices.push_back({{rect.Right(), rect.Bottom()}, uv, col});
-        m_Vertices.push_back({{rect.Left(),  rect.Bottom()}, uv, col});
-        m_Indices.insert(m_Indices.end(), {base+0,base+1,base+2, base+0,base+2,base+3});
+        AddQuad(rect, color, {-1.0f, -1.0f, -1.0f, -1.0f}, m_WhiteTex);
     }
 
     void DrawRectOutline(const Rect& rect, const Color& color, F32 thickness) {
-        DrawRect({rect.Left(), rect.Top(), rect.size.x, thickness}, color);
-        DrawRect({rect.Left(), rect.Bottom() - thickness, rect.size.x, thickness}, color);
-        DrawRect({rect.Left(), rect.Top() + thickness, thickness, rect.size.y - 2 * thickness}, color);
-        DrawRect({rect.Right() - thickness, rect.Top() + thickness, thickness, rect.size.y - 2 * thickness}, color);
+
+        const F32 l = rect.Left(), t = rect.Top();
+        const F32 r = rect.Right(), b = rect.Bottom();
+
+        AddQuad({l, t, rect.size.x, thickness}, color, {-1, -1, -1, -1}, m_WhiteTex);
+        AddQuad({l, b - thickness, rect.size.x, thickness}, color, {-1, -1, -1, -1}, m_WhiteTex);
+        AddQuad({l, t + thickness, thickness, rect.size.y - 2 * thickness}, color, {-1, -1, -1, -1}, m_WhiteTex);
+        AddQuad({r - thickness, t + thickness, thickness, rect.size.y - 2 * thickness}, color, {-1, -1, -1, -1}, m_WhiteTex);
     }
 
     void DrawText(const std::string& text, const Rect& r, U32 fontSize, const Color& color,
                   Alignment hAlign, Alignment vAlign) {
-        if (!m_Font) return;
-        BindTexture(m_Font->GetTexture());
+        if (!m_Font || text.empty()) return;
+
+        U32 textHash = std::hash<std::string>{}(text) ^ fontSize;
+        auto& cache = m_ElementCache[textHash];
+
+        if (cache.dirty || m_FrameCounter % 60 == 0) {
+            cache.vertices.clear();
+            cache.indices.clear();
+            GenerateTextGeometry(text, fontSize, cache.vertices, cache.indices);
+            cache.dirty = false;
+        }
+
         F32 px{static_cast<F32>(fontSize)};
         auto size{m_Font->MeasureText(text, px)};
         Math::Vec2 pos{r.position};
+
         if (hAlign == Alignment::Center) pos.x += (r.size.x - size.x) * 0.5f;
         else if (hAlign == Alignment::End) pos.x += (r.size.x - size.x);
-        F32 lineH{(m_Font->GetAscent() - m_Font->GetDescent() + m_Font->GetLineGap()) * (px / m_Font->GetBakePx())};
-        F32 totalH{size.y};
-        if (vAlign == Alignment::Center) pos.y += (r.size.y - totalH) * 0.5f;
-        else if (vAlign == Alignment::End) pos.y += (r.size.y - totalH);
-        F32 s{px / m_Font->GetBakePx()};
-        F32 cursorX{0.0f};
-        F32 baselineY{pos.y + m_Font->GetAscent() * s};
-        U32 col = color.ToRGBA();
-        U32 prev{0};
-        for (size_t i{0}; i < text.size();) {
-            U32 cp{};
-            size_t n{UIFont::DecodeUTF8(text, i, cp)};
-            if (n == 0) break;
-            i += n;
-            if (cp == '\n') {
-                cursorX = 0.0f;
-                baselineY += lineH;
-                prev = 0;
-                continue;
-            }
-            if (prev) cursorX += m_Font->KerningAtBakePx(prev, cp) * s;
-            F32 x0{}, y0{}, x1{}, y1{}, u0{}, v0{}, u1{}, v1{}, adv{};
-            m_Font->GetQuad(cp, cursorX / s, 0.0f, x0, y0, x1, y1, u0, v0, u1, v1, adv);
-            F32 qx0{pos.x + x0 * s};
-            F32 qy0{baselineY + y0 * s};
-            F32 qx1{pos.x + x1 * s};
-            F32 qy1{baselineY + y1 * s};
-            U32 base = static_cast<U32>(m_Vertices.size());
-            m_Vertices.push_back({{qx0, qy0}, {u0, v0}, col});
-            m_Vertices.push_back({{qx1, qy0}, {u1, v0}, col});
-            m_Vertices.push_back({{qx1, qy1}, {u1, v1}, col});
-            m_Vertices.push_back({{qx0, qy1}, {u0, v1}, col});
-            m_Indices.insert(m_Indices.end(), {base+0,base+1,base+2, base+0,base+2,base+3});
-            cursorX += adv * s;
-            prev = cp;
-        }
-    }
 
-    void DrawText(const std::string& text, const Math::Vec2& position, U32 fontSize, const Color& color) {
-        Rect r{position, {1e6f, 1e6f}};
-        DrawText(text, r, fontSize, color, Alignment::Start, Alignment::Start);
+        F32 lineH{(m_Font->GetAscent() - m_Font->GetDescent() + m_Font->GetLineGap()) * (px / m_Font->GetBakePx())};
+        if (vAlign == Alignment::Center) pos.y += (r.size.y - size.y) * 0.5f;
+        else if (vAlign == Alignment::End) pos.y += (r.size.y - size.y);
+
+        BatchCachedGeometry(cache, pos, color.ToRGBA(), m_Font->GetTexture());
     }
 
     void DrawImage(const Rect& rect, U32 texture, const Math::Vec4& uv01, const Color& tint = Color::White) {
-        BindTexture(texture);
-        U32 base = static_cast<U32>(m_Vertices.size());
-        U32 col = tint.ToRGBA();
-        m_Vertices.push_back({{rect.Left(),  rect.Top()},    {uv01.x, uv01.y}, col});
-        m_Vertices.push_back({{rect.Right(), rect.Top()},    {uv01.z, uv01.y}, col});
-        m_Vertices.push_back({{rect.Right(), rect.Bottom()}, {uv01.z, uv01.w}, col});
-        m_Vertices.push_back({{rect.Left(),  rect.Bottom()}, {uv01.x, uv01.w}, col});
-        m_Indices.insert(m_Indices.end(), {base+0,base+1,base+2, base+0,base+2,base+3});
+        AddQuad(rect, tint, uv01, texture);
     }
 
     void SetFont(std::shared_ptr<UIFont> font) { m_Font = std::move(font); }
@@ -160,6 +176,7 @@ private:
         )";
         vs.entryPoint = "VSMain";
         vs.stage = ShaderStage::Vertex;
+
         ShaderCode ps{};
         ps.source = R"(
             Texture2D gTex : register(t0);
@@ -172,63 +189,130 @@ private:
         )";
         ps.entryPoint = "PSMain";
         ps.stage = ShaderStage::Pixel;
+
         info.shaders = {vs, ps};
         info.vertexAttributes = {{"POSITION", 0}, {"TEXCOORD", 8}, {"COLOR", 16}};
         info.vertexStride = sizeof(UIVertex);
         info.topology = PrimitiveTopology::TriangleList;
         info.depthTest = false;
         info.depthWrite = false;
+
         m_Pipeline = m_Graphics->CreateGraphicsPipeline(info);
         m_ConstantBuffer = m_Graphics->CreateConstantBuffer(sizeof(Math::Mat4));
     }
 
     void CreateBuffers() {
-        const U32 maxVertices{10000};
-        const U32 maxIndices{30000};
-        m_VertexBuffer = m_Graphics->CreateVertexBuffer(nullptr, maxVertices * sizeof(UIVertex));
-        m_IndexBuffer = m_Graphics->CreateIndexBuffer(nullptr, maxIndices * sizeof(U32));
+        m_VertexBuffer = m_Graphics->CreateVertexBuffer(nullptr, MAX_VERTICES * sizeof(UIVertex));
+        m_IndexBuffer = m_Graphics->CreateIndexBuffer(nullptr, MAX_INDICES * sizeof(U32));
     }
 
-    void UpdateBuffers() {
-        if (!m_Vertices.empty()) {
-            m_VertexBuffer = m_Graphics->CreateVertexBuffer(m_Vertices.data(), m_Vertices.size() * sizeof(UIVertex));
+    void AddQuad(const Rect& rect, const Color& color, const Math::Vec4& uv, U32 texture) {
+
+        if (m_CurrentTexture != texture && m_CurrentTexture != INVALID_INDEX && !m_Indices.empty()) {
+            FlushBatch();
         }
-        if (!m_Indices.empty()) {
-            m_IndexBuffer = m_Graphics->CreateIndexBuffer(m_Indices.data(), m_Indices.size() * sizeof(U32));
+        m_CurrentTexture = texture;
+
+        if (m_Vertices.size() + 4 > MAX_VERTICES || m_Indices.size() + 6 > MAX_INDICES) {
+            FlushBatch();
+        }
+
+        U32 base = static_cast<U32>(m_Vertices.size());
+        U32 col = color.ToRGBA();
+
+        m_Vertices.push_back({{rect.Left(),  rect.Top()},    {uv.x, uv.y}, col});
+        m_Vertices.push_back({{rect.Right(), rect.Top()},    {uv.z, uv.y}, col});
+        m_Vertices.push_back({{rect.Right(), rect.Bottom()}, {uv.z, uv.w}, col});
+        m_Vertices.push_back({{rect.Left(),  rect.Bottom()}, {uv.x, uv.w}, col});
+
+        m_Indices.insert(m_Indices.end(), {base+0,base+1,base+2, base+0,base+2,base+3});
+    }
+
+    void FlushBatch() {
+        if (m_Indices.empty()) return;
+
+        m_DrawCalls.push_back({
+            static_cast<U32>(m_Indices.size()),
+            0,
+            m_CurrentTexture == INVALID_INDEX ? m_WhiteTex : m_CurrentTexture
+        });
+
+        m_CurrentTexture = INVALID_INDEX;
+    }
+
+    void GenerateTextGeometry(const std::string& text, U32 fontSize,
+                              Vector<UIVertex>& vertices, Vector<U32>& indices) {
+        F32 px{static_cast<F32>(fontSize)};
+        F32 s{px / m_Font->GetBakePx()};
+        F32 cursorX{0.0f};
+        F32 baselineY{m_Font->GetAscent() * s};
+        U32 prev{0};
+
+        for (size_t i{0}; i < text.size();) {
+            U32 cp{};
+            size_t n{UIFont::DecodeUTF8(text, i, cp)};
+            if (n == 0) break;
+            i += n;
+
+            if (cp == '\n') {
+                cursorX = 0.0f;
+                baselineY += (m_Font->GetAscent() - m_Font->GetDescent() + m_Font->GetLineGap()) * s;
+                prev = 0;
+                continue;
+            }
+
+            if (prev) cursorX += m_Font->KerningAtBakePx(prev, cp) * s;
+
+            F32 x0{}, y0{}, x1{}, y1{}, u0{}, v0{}, u1{}, v1{}, adv{};
+            m_Font->GetQuad(cp, cursorX / s, 0.0f, x0, y0, x1, y1, u0, v0, u1, v1, adv);
+
+            U32 base = static_cast<U32>(vertices.size());
+            vertices.push_back({{x0 * s, baselineY + y0 * s}, {u0, v0}, 0xFFFFFFFF});
+            vertices.push_back({{x1 * s, baselineY + y0 * s}, {u1, v0}, 0xFFFFFFFF});
+            vertices.push_back({{x1 * s, baselineY + y1 * s}, {u1, v1}, 0xFFFFFFFF});
+            vertices.push_back({{x0 * s, baselineY + y1 * s}, {u0, v1}, 0xFFFFFFFF});
+
+            indices.insert(indices.end(), {base+0,base+1,base+2, base+0,base+2,base+3});
+
+            cursorX += adv * s;
+            prev = cp;
         }
     }
 
-    void Flush() {
-        if (m_Vertices.empty()) return;
-        UpdateBuffers();
-        struct UIConstants { Math::Mat4 projection; } constants{};
-        constants.projection = Math::Mat4::Orthographic(0, m_ScreenSize.x, m_ScreenSize.y, 0, -1, 1);
-        m_Graphics->UpdateConstantBuffer(m_ConstantBuffer, &constants, sizeof(constants));
-        m_Graphics->SetPipeline(m_Pipeline);
-        m_Graphics->SetVertexBuffer(m_VertexBuffer);
-        m_Graphics->SetIndexBuffer(m_IndexBuffer);
-        m_Graphics->SetConstantBuffer(m_ConstantBuffer, 0);
-        if (m_CurrentTexture == INVALID_INDEX) m_CurrentTexture = m_WhiteTex;
-        m_Graphics->SetTexture(m_CurrentTexture, 0);
-        m_Graphics->DrawIndexed(static_cast<U32>(m_Indices.size()));
-        m_Vertices.clear();
-        m_Indices.clear();
-    }
+    void BatchCachedGeometry(const VertexCache& cache, const Math::Vec2& offset, U32 color, U32 texture) {
+        if (m_CurrentTexture != texture && m_CurrentTexture != INVALID_INDEX && !m_Indices.empty()) {
+            FlushBatch();
+        }
+        m_CurrentTexture = texture;
 
-    void BindTexture(U32 tex) {
-        if (tex == INVALID_INDEX) tex = m_WhiteTex;
-        if (m_CurrentTexture != tex) {
-            Flush();
-            m_CurrentTexture = tex;
+        if (m_Vertices.size() + cache.vertices.size() > MAX_VERTICES ||
+            m_Indices.size() + cache.indices.size() > MAX_INDICES) {
+            FlushBatch();
+        }
+
+        U32 base = static_cast<U32>(m_Vertices.size());
+
+        for (const auto& v : cache.vertices) {
+            m_Vertices.push_back({
+                {v.position.x + offset.x, v.position.y + offset.y},
+                v.uv,
+                color
+            });
+        }
+
+        for (U32 idx : cache.indices) {
+            m_Indices.push_back(base + idx);
         }
     }
 };
 
 void UIPanel::OnDraw(UIRenderer* renderer) {
-    if (m_BorderWidth > 0) {
+    if (m_BackgroundColor.a > 0.01f) {
+        renderer->DrawRect(m_WorldRect, m_BackgroundColor);
+    }
+    if (m_BorderWidth > 0 && m_BorderColor.a > 0.01f) {
         renderer->DrawRectOutline(m_WorldRect, m_BorderColor, m_BorderWidth);
     }
-    renderer->DrawRect(m_WorldRect, m_BackgroundColor);
 }
 
 void UIText::OnDraw(UIRenderer* renderer) {
