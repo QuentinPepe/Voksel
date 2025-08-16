@@ -4,4 +4,4 @@ target_link_libraries(voxel_engine
         PUBLIC
         glfw
 )
-target_link_libraries(voxel_engine PUBLIC directx12)
+target_link_libraries(voxel_engine PUBLIC directx12 stb_headers)

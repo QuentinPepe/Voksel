@@ -81,3 +81,14 @@ FetchContent_Declare(
         GIT_TAG        v2.13.10
 )
 FetchContent_MakeAvailable(catch2)
+
+# stb (header-only)
+FetchContent_Declare(
+        stb
+        GIT_REPOSITORY https://github.com/nothings/stb.git
+        GIT_TAG        master
+)
+FetchContent_MakeAvailable(stb)
+
+add_library(stb_headers INTERFACE)
+target_include_directories(stb_headers INTERFACE ${stb_SOURCE_DIR})

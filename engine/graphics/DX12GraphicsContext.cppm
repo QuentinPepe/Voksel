@@ -31,6 +31,7 @@ using Microsoft::WRL::ComPtr;
 
 struct ResourceHandle {
     enum Type { VertexBuffer, IndexBuffer, Pipeline } type;
+
     U32 index;
 };
 
@@ -39,11 +40,11 @@ private:
     std::unique_ptr<Renderer> m_Renderer;
     Window *m_Window;
     std::unique_ptr<ShaderManager> m_ShaderManager;
-    std::vector<std::unique_ptr<Buffer>> m_VertexBuffers;
-    std::vector<std::unique_ptr<Buffer>> m_IndexBuffers;
-    std::vector<std::unique_ptr<Buffer>> m_ConstantBuffers;
-    std::vector<std::unique_ptr<GraphicsPipeline>> m_Pipelines;
-    std::vector<std::unique_ptr<RootSignature>> m_RootSignatures;
+    std::vector<std::unique_ptr<Buffer> > m_VertexBuffers;
+    std::vector<std::unique_ptr<Buffer> > m_IndexBuffers;
+    std::vector<std::unique_ptr<Buffer> > m_ConstantBuffers;
+    std::vector<std::unique_ptr<GraphicsPipeline> > m_Pipelines;
+    std::vector<std::unique_ptr<RootSignature> > m_RootSignatures;
     std::vector<D3D_PRIMITIVE_TOPOLOGY> m_PipelineTopologies;
     std::vector<UINT> m_PipelineVertexStrides;
 
@@ -58,7 +59,7 @@ private:
     bool m_InRenderPass = false;
 
     struct FramePassData {
-        std::vector<std::function<void(ID3D12GraphicsCommandList *)>> commands;
+        std::vector<std::function<void(ID3D12GraphicsCommandList *)> > commands;
         RenderPassInfo passInfo;
     };
 
@@ -121,29 +122,77 @@ public:
             std::memcpy(mapped, data, static_cast<size_t>(size));
             upload->Unmap(0, nullptr);
 
-            auto *cmd{m_Renderer->GetCurrentCommandList().GetCommandList()};
+            auto &curCL{m_Renderer->GetCurrentCommandList()};
+            if (curCL.IsRecording()) {
+                auto *cmd{curCL.GetCommandList()};
+                D3D12_RESOURCE_BARRIER b0{};
+                b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                b0.Transition.pResource = buffer->GetResource();
+                b0.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                b0.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+                b0.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+                cmd->ResourceBarrier(1, &b0);
+                buffer->SetCurrentState(D3D12_RESOURCE_STATE_COPY_DEST);
 
-            D3D12_RESOURCE_BARRIER b0{};
-            b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            b0.Transition.pResource = buffer->GetResource();
-            b0.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            b0.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
-            b0.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
-            cmd->ResourceBarrier(1, &b0);
-            buffer->SetCurrentState(D3D12_RESOURCE_STATE_COPY_DEST);
+                cmd->CopyBufferRegion(buffer->GetResource(), 0, upload.Get(), 0, size);
 
-            cmd->CopyBufferRegion(buffer->GetResource(), 0, upload.Get(), 0, size);
+                D3D12_RESOURCE_BARRIER b1{};
+                b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                b1.Transition.pResource = buffer->GetResource();
+                b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+                b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+                cmd->ResourceBarrier(1, &b1);
+                buffer->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
 
-            D3D12_RESOURCE_BARRIER b1{};
-            b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            b1.Transition.pResource = buffer->GetResource();
-            b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-            b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
-            cmd->ResourceBarrier(1, &b1);
-            buffer->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+                curCL.KeepAlive(upload);
+            } else {
+                ComPtr<ID3D12CommandAllocator> alloc{};
+                ComPtr<ID3D12GraphicsCommandList> cmd{};
+                auto *dev{m_Renderer->GetDevice().GetDevice()};
+                auto *q{m_Renderer->GetDevice().GetDirectQueue()};
+                assert(
+                    SUCCEEDED(dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))),
+                    "alloc");
+                assert(SUCCEEDED(
+                    dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr, IID_PPV_ARGS(&cmd)
+                    )), "cmdlist");
 
-            m_Renderer->GetCurrentCommandList().KeepAlive(upload);
+                D3D12_RESOURCE_BARRIER b0{};
+                b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                b0.Transition.pResource = buffer->GetResource();
+                b0.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                b0.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+                b0.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+                cmd->ResourceBarrier(1, &b0);
+                buffer->SetCurrentState(D3D12_RESOURCE_STATE_COPY_DEST);
+
+                cmd->CopyBufferRegion(buffer->GetResource(), 0, upload.Get(), 0, size);
+
+                D3D12_RESOURCE_BARRIER b1{};
+                b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                b1.Transition.pResource = buffer->GetResource();
+                b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+                b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+                cmd->ResourceBarrier(1, &b1);
+                buffer->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+
+                assert(SUCCEEDED(cmd->Close()), "close");
+                ID3D12CommandList *lists[]{cmd.Get()};
+                q->ExecuteCommandLists(1, lists);
+
+                ComPtr<ID3D12Fence> fence{};
+                assert(SUCCEEDED(dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))), "fence");
+                HANDLE evt{CreateEvent(nullptr, FALSE, FALSE, nullptr)};
+                assert(evt != nullptr, "event");
+                assert(SUCCEEDED(q->Signal(fence.Get(), 1)), "signal");
+                if (fence->GetCompletedValue() < 1) {
+                    fence->SetEventOnCompletion(1, evt);
+                    WaitForSingleObject(evt, INFINITE);
+                }
+                CloseHandle(evt);
+            }
         }
 
         U32 handle{static_cast<U32>(m_VertexBuffers.size())};
@@ -151,7 +200,8 @@ public:
         return handle;
     }
 
-    U32 CreateIndexBuffer(const void *data, U64 size) override {
+
+    U32 CreateIndexBuffer(const void* data, U64 size) override {
         BufferDesc desc{};
         desc.size = size;
         desc.usage = ResourceUsage::IndexBuffer | ResourceUsage::CopyDest;
@@ -178,40 +228,96 @@ public:
                 &heapProps, D3D12_HEAP_FLAG_NONE, &rd,
                 D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upload))), "Failed to create upload buffer");
 
-            void *mapped{};
+            void* mapped{};
             D3D12_RANGE range{0, 0};
             assert(SUCCEEDED(upload->Map(0, &range, &mapped)), "Map failed");
             std::memcpy(mapped, data, static_cast<size_t>(size));
             upload->Unmap(0, nullptr);
 
-            auto *cmd{m_Renderer->GetCurrentCommandList().GetCommandList()};
+            auto& curCL{m_Renderer->GetCurrentCommandList()};
+            if (curCL.IsRecording()) {
+                auto* cmd{curCL.GetCommandList()};
+                D3D12_RESOURCE_BARRIER b0{};
+                b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                b0.Transition.pResource = buffer->GetResource();
+                b0.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                b0.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+                b0.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+                cmd->ResourceBarrier(1, &b0);
+                buffer->SetCurrentState(D3D12_RESOURCE_STATE_COPY_DEST);
 
-            D3D12_RESOURCE_BARRIER b0{};
-            b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            b0.Transition.pResource = buffer->GetResource();
-            b0.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            b0.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
-            b0.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
-            cmd->ResourceBarrier(1, &b0);
-            buffer->SetCurrentState(D3D12_RESOURCE_STATE_COPY_DEST);
+                cmd->CopyBufferRegion(buffer->GetResource(), 0, upload.Get(), 0, size);
 
-            cmd->CopyBufferRegion(buffer->GetResource(), 0, upload.Get(), 0, size);
+                D3D12_RESOURCE_BARRIER b1{};
+                b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                b1.Transition.pResource = buffer->GetResource();
+                b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+                b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+                cmd->ResourceBarrier(1, &b1);
+                buffer->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
 
-            D3D12_RESOURCE_BARRIER b1{};
-            b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            b1.Transition.pResource = buffer->GetResource();
-            b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-            b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
-            cmd->ResourceBarrier(1, &b1);
-            buffer->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+                curCL.KeepAlive(upload);
+            } else {
+                ComPtr<ID3D12CommandAllocator> alloc{};
+                ComPtr<ID3D12GraphicsCommandList> cmd{};
+                auto* dev{m_Renderer->GetDevice().GetDevice()};
+                auto* q{m_Renderer->GetDevice().GetDirectQueue()};
+                assert(SUCCEEDED(dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))), "alloc");
+                assert(SUCCEEDED(dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr, IID_PPV_ARGS(&cmd))), "cmdlist");
 
-            m_Renderer->GetCurrentCommandList().KeepAlive(upload);
+                D3D12_RESOURCE_BARRIER b0{};
+                b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                b0.Transition.pResource = buffer->GetResource();
+                b0.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                b0.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+                b0.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+                cmd->ResourceBarrier(1, &b0);
+                buffer->SetCurrentState(D3D12_RESOURCE_STATE_COPY_DEST);
+
+                cmd->CopyBufferRegion(buffer->GetResource(), 0, upload.Get(), 0, size);
+
+                D3D12_RESOURCE_BARRIER b1{};
+                b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                b1.Transition.pResource = buffer->GetResource();
+                b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+                b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+                cmd->ResourceBarrier(1, &b1);
+                buffer->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+
+                assert(SUCCEEDED(cmd->Close()), "close");
+                ID3D12CommandList* lists[]{cmd.Get()};
+                q->ExecuteCommandLists(1, lists);
+
+                ComPtr<ID3D12Fence> fence{};
+                assert(SUCCEEDED(dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))), "fence");
+                HANDLE evt{CreateEvent(nullptr, FALSE, FALSE, nullptr)};
+                assert(evt != nullptr, "event");
+                assert(SUCCEEDED(q->Signal(fence.Get(), 1)), "signal");
+                if (fence->GetCompletedValue() < 1) {
+                    fence->SetEventOnCompletion(1, evt);
+                    WaitForSingleObject(evt, INFINITE);
+                }
+                CloseHandle(evt);
+            }
         }
 
         U32 handle{static_cast<U32>(m_IndexBuffers.size())};
         m_IndexBuffers.push_back(std::move(buffer));
         return handle;
+    }
+
+    void UpdateVertexBuffer(U32 buffer, const void* data, U64 size, U64 dstOffset) override {
+        assert(buffer < m_VertexBuffers.size(), "invalid vertex buffer handle");
+        assert(data && size > 0, "invalid data");
+        UpdateBuffer(*m_VertexBuffers[buffer], data, size, dstOffset);
+    }
+
+    void UpdateIndexBuffer(U32 buffer, const void* data, U64 size, U64 dstOffset) override {
+        assert(buffer < m_IndexBuffers.size(), "invalid index buffer handle");
+        assert(data && size > 0, "invalid data");
+        UpdateBuffer(*m_IndexBuffers[buffer], data, size, dstOffset);
     }
 
     U32 CreateConstantBuffer(U64 size) override {
@@ -232,7 +338,6 @@ public:
     }
 
     U32 CreateGraphicsPipeline(const GraphicsPipelineCreateInfo &info) override {
-
         std::vector<D3D12_ROOT_PARAMETER> rootParams{};
         D3D12_ROOT_PARAMETER p0{};
         p0.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
@@ -314,7 +419,9 @@ public:
             if (name == "NORMAL") fmt = DXGI_FORMAT_R32G32B32_FLOAT;
             else if (name == "TEXCOORD") fmt = DXGI_FORMAT_R32G32_FLOAT;
             else if (name == "COLOR") fmt = DXGI_FORMAT_R32_UINT;
-            layout.push_back(D3D12_INPUT_ELEMENT_DESC{name.c_str(), 0, fmt, 0, off, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0});
+            layout.push_back(D3D12_INPUT_ELEMENT_DESC{
+                name.c_str(), 0, fmt, 0, off, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
+            });
         }
         pd.inputLayout = std::move(layout);
         pd.rootSignature = rootSig->GetRootSignature();
@@ -368,10 +475,12 @@ public:
         auto passData{std::make_shared<FramePassData>(std::move(*m_CurrentPassData))};
         m_CurrentPassData = std::make_unique<FramePassData>();
 
-        struct _NoPassData {};
+        struct _NoPassData {
+        };
         m_Renderer->GetRenderGraph().AddPass<_NoPassData>(
             passData->passInfo.name,
-            [](RenderGraphBuilder &, _NoPassData &) {},
+            [](RenderGraphBuilder &, _NoPassData &) {
+            },
             [this, passData](const RenderGraphResources &, CommandList &cmdList, const _NoPassData &) {
                 ExecuteRenderPass(cmdList, *passData);
             }
@@ -468,7 +577,8 @@ public:
         ID3D12Resource *resource{tex->GetResource()};
         D3D12_RESOURCE_DESC rd{resource->GetDesc()};
         U64 uploadSize{0};
-        m_Renderer->GetDevice().GetDevice()->GetCopyableFootprints(&rd, 0, 1, 0, nullptr, nullptr, nullptr, &uploadSize);
+        m_Renderer->GetDevice().GetDevice()->
+                GetCopyableFootprints(&rd, 0, 1, 0, nullptr, nullptr, nullptr, &uploadSize);
 
         D3D12_HEAP_PROPERTIES heapProps{};
         heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -482,7 +592,7 @@ public:
         bufDesc.SampleDesc = {1, 0};
         bufDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
         bufDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-        ComPtr<ID3D12Resource> upload;
+        ComPtr<ID3D12Resource> upload{};
         assert(SUCCEEDED(
             m_Renderer->GetDevice().GetDevice()->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &bufDesc,
                 D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upload))), "Failed to create upload buffer");
@@ -491,23 +601,65 @@ public:
         sub.pData = rgba8;
         sub.RowPitch = static_cast<LONG_PTR>(width) * 4;
         sub.SlicePitch = sub.RowPitch * height;
-        auto *cmd{m_Renderer->GetCurrentCommandList().GetCommandList()};
-        D3D12_RESOURCE_BARRIER b0{};
-        b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        b0.Transition.pResource = resource;
-        b0.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        b0.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
-        b0.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
-        cmd->ResourceBarrier(1, &b0);
-        UpdateSubresources(cmd, resource, upload.Get(), 0, 0, 1, &sub);
-        m_Renderer->GetCurrentCommandList().KeepAlive(upload);
-        D3D12_RESOURCE_BARRIER b1{};
-        b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        b1.Transition.pResource = resource;
-        b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-        b1.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-        cmd->ResourceBarrier(1, &b1);
+
+        auto &curCL{m_Renderer->GetCurrentCommandList()};
+        if (curCL.IsRecording()) {
+            auto *cmd{curCL.GetCommandList()};
+            D3D12_RESOURCE_BARRIER b0{};
+            b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b0.Transition.pResource = resource;
+            b0.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b0.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+            b0.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+            cmd->ResourceBarrier(1, &b0);
+            UpdateSubresources(cmd, resource, upload.Get(), 0, 0, 1, &sub);
+            curCL.KeepAlive(upload);
+            D3D12_RESOURCE_BARRIER b1{};
+            b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b1.Transition.pResource = resource;
+            b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+            b1.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            cmd->ResourceBarrier(1, &b1);
+        } else {
+            ComPtr<ID3D12CommandAllocator> alloc{};
+            ComPtr<ID3D12GraphicsCommandList> cmd{};
+            auto *dev{m_Renderer->GetDevice().GetDevice()};
+            auto *q{m_Renderer->GetDevice().GetDirectQueue()};
+            assert(
+                SUCCEEDED(dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))), "alloc");
+            assert(SUCCEEDED(
+                dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr, IID_PPV_ARGS(&cmd)
+                )), "cmdlist");
+            D3D12_RESOURCE_BARRIER b0{};
+            b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b0.Transition.pResource = resource;
+            b0.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b0.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+            b0.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+            cmd->ResourceBarrier(1, &b0);
+            UpdateSubresources(cmd.Get(), resource, upload.Get(), 0, 0, 1, &sub);
+            D3D12_RESOURCE_BARRIER b1{};
+            b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b1.Transition.pResource = resource;
+            b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+            b1.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            cmd->ResourceBarrier(1, &b1);
+            assert(SUCCEEDED(cmd->Close()), "close");
+            ID3D12CommandList *lists[]{cmd.Get()};
+            q->ExecuteCommandLists(1, lists);
+            ComPtr<ID3D12Fence> fence{};
+            assert(SUCCEEDED(dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))), "fence");
+            HANDLE evt{CreateEvent(nullptr, FALSE, FALSE, nullptr)};
+            assert(evt != nullptr, "event");
+            assert(SUCCEEDED(q->Signal(fence.Get(), 1)), "signal");
+            if (fence->GetCompletedValue() < 1) {
+                fence->SetEventOnCompletion(1, evt);
+                WaitForSingleObject(evt, INFINITE);
+            }
+            CloseHandle(evt);
+        }
 
         auto handle{m_Renderer->GetCbvSrvUavHeap()->Allocate()};
         D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
@@ -554,18 +706,123 @@ public:
     }
 
 private:
+    void UpdateBuffer(Buffer& dst, const void* data, U64 size, U64 dstOffset) {
+        if (!data || size == 0) { return; }
+        assert(dstOffset + size <= dst.GetDesc().size, "update exceeds buffer size");
+
+        D3D12_HEAP_PROPERTIES heapProps{};
+        heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+        D3D12_RESOURCE_DESC rd{};
+        rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        rd.Width = size;
+        rd.Height = 1;
+        rd.DepthOrArraySize = 1;
+        rd.MipLevels = 1;
+        rd.Format = DXGI_FORMAT_UNKNOWN;
+        rd.SampleDesc = {1, 0};
+        rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        rd.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        ComPtr<ID3D12Resource> upload{};
+        assert(SUCCEEDED(m_Renderer->GetDevice().GetDevice()->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE, &rd,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upload))), "upload buffer");
+
+        void* mapped{};
+        D3D12_RANGE range{0, 0};
+        assert(SUCCEEDED(upload->Map(0, &range, &mapped)), "map");
+        std::memcpy(mapped, data, static_cast<size_t>(size));
+        upload->Unmap(0, nullptr);
+
+        auto& curCL{m_Renderer->GetCurrentCommandList()};
+        if (curCL.IsRecording()) {
+            auto* cmd{curCL.GetCommandList()};
+
+            D3D12_RESOURCE_BARRIER b0{};
+            b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b0.Transition.pResource = dst.GetResource();
+            b0.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b0.Transition.StateBefore = dst.GetCurrentState();
+            b0.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+            if (b0.Transition.StateBefore != b0.Transition.StateAfter) { cmd->ResourceBarrier(1, &b0); }
+            dst.SetCurrentState(D3D12_RESOURCE_STATE_COPY_DEST);
+
+            cmd->CopyBufferRegion(dst.GetResource(), dstOffset, upload.Get(), 0, size);
+
+            D3D12_RESOURCE_BARRIER b1{};
+            b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b1.Transition.pResource = dst.GetResource();
+            b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+            b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+            cmd->ResourceBarrier(1, &b1);
+            dst.SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+
+            curCL.KeepAlive(upload);
+        } else {
+            ComPtr<ID3D12CommandAllocator> alloc{};
+            ComPtr<ID3D12GraphicsCommandList> cmd{};
+            auto* dev{m_Renderer->GetDevice().GetDevice()};
+            auto* q{m_Renderer->GetDevice().GetDirectQueue()};
+            assert(SUCCEEDED(dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))), "alloc");
+            assert(SUCCEEDED(dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr, IID_PPV_ARGS(&cmd))), "cmdlist");
+
+            D3D12_RESOURCE_BARRIER b0{};
+            b0.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b0.Transition.pResource = dst.GetResource();
+            b0.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b0.Transition.StateBefore = dst.GetCurrentState();
+            b0.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+            if (b0.Transition.StateBefore != b0.Transition.StateAfter) { cmd->ResourceBarrier(1, &b0); }
+            dst.SetCurrentState(D3D12_RESOURCE_STATE_COPY_DEST);
+
+            cmd->CopyBufferRegion(dst.GetResource(), dstOffset, upload.Get(), 0, size);
+
+            D3D12_RESOURCE_BARRIER b1{};
+            b1.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b1.Transition.pResource = dst.GetResource();
+            b1.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b1.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+            b1.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+            cmd->ResourceBarrier(1, &b1);
+            dst.SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+
+            assert(SUCCEEDED(cmd->Close()), "close");
+            ID3D12CommandList* lists[]{cmd.Get()};
+            q->ExecuteCommandLists(1, lists);
+
+            ComPtr<ID3D12Fence> fence{};
+            assert(SUCCEEDED(dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))), "fence");
+            HANDLE evt{CreateEvent(nullptr, FALSE, FALSE, nullptr)};
+            assert(evt != nullptr, "event");
+            assert(SUCCEEDED(q->Signal(fence.Get(), 1)), "signal");
+            if (fence->GetCompletedValue() < 1) {
+                fence->SetEventOnCompletion(1, evt);
+                WaitForSingleObject(evt, INFINITE);
+            }
+            CloseHandle(evt);
+        }
+    }
+
     void ExecuteRenderPass(CommandList &cmdList, const FramePassData &passData) const {
         auto *cmd{cmdList.GetCommandList()};
-        D3D12_VIEWPORT viewport{0.0f, 0.0f, static_cast<float>(m_Renderer->GetSwapChain().GetWidth()),
-                                static_cast<float>(m_Renderer->GetSwapChain().GetHeight()), 0.0f, 1.0f};
-        D3D12_RECT scissor{0, 0, static_cast<LONG>(m_Renderer->GetSwapChain().GetWidth()),
-                           static_cast<LONG>(m_Renderer->GetSwapChain().GetHeight())};
+        D3D12_VIEWPORT viewport{
+            0.0f, 0.0f, static_cast<float>(m_Renderer->GetSwapChain().GetWidth()),
+            static_cast<float>(m_Renderer->GetSwapChain().GetHeight()), 0.0f, 1.0f
+        };
+        D3D12_RECT scissor{
+            0, 0, static_cast<LONG>(m_Renderer->GetSwapChain().GetWidth()),
+            static_cast<LONG>(m_Renderer->GetSwapChain().GetHeight())
+        };
         cmd->RSSetViewports(1, &viewport);
         cmd->RSSetScissorRects(1, &scissor);
         ID3D12DescriptorHeap *heaps[]{m_Renderer->GetCbvSrvUavHeap()->GetCurrentHeap()};
         cmd->SetDescriptorHeaps(1, heaps);
 
-        Resource rtResource{m_Renderer->GetCurrentRenderTarget(), D3D12_RESOURCE_STATE_PRESENT, ResourceType::Texture2D};
+        Resource rtResource{
+            m_Renderer->GetCurrentRenderTarget(), D3D12_RESOURCE_STATE_PRESENT, ResourceType::Texture2D
+        };
         rtResource.SetTracked(true);
         cmdList.TransitionResource(rtResource, D3D12_RESOURCE_STATE_RENDER_TARGET);
         auto rtvHandle{m_Renderer->GetCurrentRTV()};
@@ -576,7 +833,8 @@ private:
             cmd->ClearRenderTargetView(rtvHandle, passData.passInfo.clearColorValue, 0, nullptr);
         }
         if (passData.passInfo.clearDepth) {
-            cmd->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, passData.passInfo.clearDepthValue, 0, 0, nullptr);
+            cmd->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, passData.passInfo.clearDepthValue, 0, 0,
+                                       nullptr);
         }
 
         for (auto const &command: passData.commands) command(cmd);

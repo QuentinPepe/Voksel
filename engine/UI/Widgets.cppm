@@ -18,7 +18,7 @@ public:
     void SetBorderColor(const Color& color) { m_BorderColor = color; }
 
 protected:
-    void OnDraw(class UIRenderer* renderer) override;
+    void OnDraw(class UIRenderer* renderer);
 };
 
 export class UIText : public UIElement {
@@ -235,4 +235,19 @@ protected:
 
     void UpdateScrollbars() {
     }
+};
+
+export class UIImage : public UIElement {
+protected:
+    U32 m_Texture{INVALID_INDEX};
+    Math::Vec4 m_UV{0.0f,0.0f,1.0f,1.0f};
+    Color m_Tint{Color::White};
+
+public:
+    void SetTexture(U32 tex){ m_Texture = tex; }
+    void SetUVRect(const Math::Vec4& uv01){ m_UV = uv01; }
+    void SetTint(const Color& c){ m_Tint = c; }
+
+protected:
+    void OnDraw(class UIRenderer* renderer) override;
 };

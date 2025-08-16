@@ -2,6 +2,7 @@ export module UI.Element;
 
 import UI.Core;
 import Core.Types;
+import Core.Assert;
 import Math.Vector;
 import std;
 
@@ -42,12 +43,13 @@ public:
 
     void AddChild(UIElementPtr child) {
         if (child && child.get() != this) {
-            if (auto oldParent = child->m_Parent.lock()) {
+            if (auto oldParent{child->m_Parent.lock()}) {
                 oldParent->RemoveChild(child);
             }
             m_Children.push_back(child);
             child->m_Parent = weak_from_this();
             child->MarkDirty();
+            MarkDirty();
         }
     }
 
@@ -193,47 +195,28 @@ protected:
     }
 
     void CalculateLocalRect() {
-        if (auto parent = m_Parent.lock()) {
-            const Rect& parentRect = parent->GetLocalRect();
+        if (auto parent{m_Parent.lock()}) {
+            const Rect& pr{parent->GetLocalRect()};
+            Math::Vec2 aMin{m_Anchor.min.x * pr.size.x, m_Anchor.min.y * pr.size.y};
+            Math::Vec2 aMax{m_Anchor.max.x * pr.size.x, m_Anchor.max.y * pr.size.y};
 
-            Math::Vec2 anchorMin{
-                m_Anchor.min.x * parentRect.size.x,
-                m_Anchor.min.y * parentRect.size.y
-            };
-            Math::Vec2 anchorMax{
-                m_Anchor.max.x * parentRect.size.x,
-                m_Anchor.max.y * parentRect.size.y
-            };
+            const bool stretchX{m_Anchor.min.x != m_Anchor.max.x};
+            const bool stretchY{m_Anchor.min.y != m_Anchor.max.y};
 
-            Math::Vec2 size;
-            if (m_Anchor.min.x != m_Anchor.max.x) {
-                size.x = anchorMax.x - anchorMin.x - m_Margin.left - m_Margin.right;
-            } else {
-                size.x = m_SizeDelta.x;
-            }
+            Math::Vec2 size{};
+            size.x = stretchX ? (aMax.x - aMin.x - m_Margin.left - m_Margin.right) : m_SizeDelta.x;
+            size.y = stretchY ? (aMax.y - aMin.y - m_Margin.top - m_Margin.bottom) : m_SizeDelta.y;
+            assert(size.x >= 0.0f && size.y >= 0.0f, "negative size");
 
-            if (m_Anchor.min.y != m_Anchor.max.y) {
-                size.y = anchorMax.y - anchorMin.y - m_Margin.top - m_Margin.bottom;
-            } else {
-                size.y = m_SizeDelta.y;
-            }
+            Math::Vec2 pos{};
+            pos.x = stretchX ? (aMin.x + m_Margin.left + m_AnchoredPosition.x)
+                             : (aMin.x + m_AnchoredPosition.x - m_Pivot.x * size.x);
+            pos.y = stretchY ? (aMin.y + m_Margin.top + m_AnchoredPosition.y)
+                             : (aMin.y + m_AnchoredPosition.y - m_Pivot.y * size.y);
 
-            Math::Vec2 pivotOffset{
-                size.x * m_Pivot.x,
-                size.y * m_Pivot.y
-            };
-            Math::Vec2 anchorCenter = (anchorMin + anchorMax) * 0.5f;
-            Math::Vec2 position = anchorCenter + m_AnchoredPosition - pivotOffset;
-
-            position.x += m_Margin.left;
-            position.y += m_Margin.top;
-
-            m_LocalRect = Rect{position, size};
+            m_LocalRect = Rect{pos, size};
         } else {
-            Math::Vec2 pivotOffset{
-                m_SizeDelta.x * m_Pivot.x,
-                m_SizeDelta.y * m_Pivot.y
-            };
+            Math::Vec2 pivotOffset{m_SizeDelta.x * m_Pivot.x, m_SizeDelta.y * m_Pivot.y};
             m_LocalRect = Rect{m_AnchoredPosition - pivotOffset, m_SizeDelta};
         }
     }

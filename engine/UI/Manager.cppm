@@ -5,11 +5,13 @@ import UI.Element;
 import UI.Layout;
 import UI.Widgets;
 import UI.Renderer;
+import UI.Font;
 import Graphics;
 import Input.Core;
 import Input.Manager;
 import Math.Vector;
 import Core.Types;
+import Core.Assert;
 import std;
 
 export class UIManager {
@@ -19,6 +21,7 @@ private:
     InputManager* m_InputManager{nullptr};
     Math::Vec2 m_ScreenSize{1280.0f, 720.0f};
     bool m_MouseWasDown{false};
+    std::shared_ptr<UIFont> m_Font{};
 
 public:
     UIManager(IGraphicsContext* graphics, InputManager* input)
@@ -40,6 +43,14 @@ public:
         m_ScreenSize = {width, height};
         m_Root->SetSizeDelta(m_ScreenSize);
         m_Renderer->SetScreenSize(width, height);
+    }
+
+    void SetFontFromTTF(const std::string& path, F32 bakePx = 48.0f) {
+        auto f{std::make_shared<UIFont>()};
+        bool ok{f->LoadFromFile(m_Renderer ? m_Renderer->GetGraphics() : nullptr, path, bakePx)};
+        assert(ok, "font load failed");
+        m_Font = f;
+        m_Renderer->SetFont(m_Font);
     }
 
     void Update(F32 deltaTime) {
@@ -102,6 +113,12 @@ public:
 
     UIElementPtr CreateScrollView() {
         return std::make_shared<UIScrollView>();
+    }
+
+    UIElementPtr CreateImage(const std::string& name = "") {
+        auto img = std::make_shared<UIImage>();
+        img->SetName(name);
+        return img;
     }
 
     UIElementPtr FindElement(const std::string& name) {

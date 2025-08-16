@@ -297,16 +297,5 @@ private:
                 m_PostFrameCallback(m_CurrentFrame);
             }
         });
-
-        phase->AddTask("CollectStats", [this]() {
-            if (m_ProfilingEnabled) {
-                if (m_CurrentFrame.frameNumber % 60 == 0) {
-                    Logger::Debug(LogTasks, "Frame {} - Total: {}ms, FPS: {:.1f}",
-                                  m_CurrentFrame.frameNumber,
-                                  GetAverageFrameTime(),
-                                  GetFPS());
-                }
-            }
-        }, TaskPriority::Low);
     }
 };
