@@ -58,14 +58,14 @@ namespace noise {
         return sum / std::max(0.0001f, norm);
     }
 
-    // Génère une valeur de biome simple et équilibrée
+    // Generates a simple and balanced biome value
     inline F32 biomeValue(F32 x, F32 z, F32 freq = 0.004f) {
-        F32 large = value2D(x * freq, z * freq);           // Grandes zones
-        F32 detail = value2D(x * freq * 3.0f, z * freq * 3.0f) * 0.3f; // Détails
+        F32 large = value2D(x * freq, z * freq);           // Large areas
+        F32 detail = value2D(x * freq * 3.0f, z * freq * 3.0f) * 0.3f; // Details
         return large + detail;
     }
 
-    // Génère la hauteur de terrain basique
+    // Generates basic terrain height
     inline F32 terrainNoise(F32 x, F32 z, F32 freq = 0.025f) {
         return fbm2D(x * freq, z * freq, 4u, 0.5f, 2.0f);
     }
@@ -88,7 +88,7 @@ struct BiomeData {
 };
 
 namespace biomes {
-    // Définition des données de biomes
+    // Defines biome data
     static BiomeData GetBiomeData(BiomeType type) {
         switch (type) {
             case BiomeType::Plains:
@@ -115,13 +115,13 @@ namespace biomes {
         return GetBiomeData(BiomeType::Plains);
     }
 
-    // Détermine le biome principal pour une position
+    // Determines the primary biome for a position
     static BiomeType GetPrimaryBiome(F32 x, F32 z) {
         F32 biomeNoise = noise::biomeValue(x, z);
         return (biomeNoise > 0.6f) ? BiomeType::Desert : BiomeType::Plains;
     }
 
-    // Calcule le facteur de mélange entre biomes
+    // Calculates the blend factor between biomes
     static F32 GetBiomeBlendFactor(F32 x, F32 z, BiomeType targetBiome) {
         F32 biomeNoise = noise::biomeValue(x, z);
 
@@ -136,19 +136,19 @@ namespace biomes {
         }
     }
 
-    // Génère la hauteur pour un biome spécifique
+    // Generates the height for a specific biome
     static S32 GenerateBiomeHeight(F32 x, F32 z, const BiomeData& biome) {
         F32 terrainNoise = noise::terrainNoise(x, z);
         return static_cast<S32>(biome.heightBase + terrainNoise * biome.heightAmp);
     }
 
-    // Calcule la hauteur finale avec mélange de biomes
+    // Calculates the final height with biome blending
     static S32 CalculateBlendedHeight(F32 x, F32 z) {
         BiomeType primaryBiome = GetPrimaryBiome(x, z);
         BiomeData primaryData = GetBiomeData(primaryBiome);
         S32 primaryHeight = GenerateBiomeHeight(x, z, primaryData);
 
-        // Vérifier si on est dans une zone de transition
+        // Check if we are in a transition zone
         BiomeType otherBiome = (primaryBiome == BiomeType::Plains) ? BiomeType::Desert : BiomeType::Plains;
         F32 blendFactor = GetBiomeBlendFactor(x, z, otherBiome);
 
@@ -175,7 +175,7 @@ struct GenJob {
 
 // ===== TERRAIN GENERATION =====
 namespace terrain {
-    // Place les blocs de base selon le biome
+    // Places the base blocks according to the biome
     static void PlaceBaseBlocks(Vector<Voxel>& blocks, U32 x, U32 y, U32 z,
                                S32 globalY, S32 height, const BiomeData& biome) {
         Voxel blockType = Voxel::Air;
@@ -191,7 +191,7 @@ namespace terrain {
         blocks[VoxelIndex(x, y, z)] = blockType;
     }
 
-    // Génère une heightmap pour un chunk
+    // Generates a heightmap for a chunk
     static void GenerateHeightMap(Vector<S32>& heightMap, Vector<BiomeType>& biomeMap,
                                  const GenJob& job, U32 chunkSizeX, U32 chunkSizeZ) {
         for (U32 z{}; z < chunkSizeZ; ++z) {
@@ -208,7 +208,7 @@ namespace terrain {
         }
     }
 
-    // Place tous les blocs de terrain
+    // Places all terrain blocks
     static void PlaceTerrainBlocks(Vector<Voxel>& blocks, const Vector<S32>& heightMap,
                                   const Vector<BiomeType>& biomeMap, const GenJob& job,
                                   U32 chunkSizeX, U32 chunkSizeY, U32 chunkSizeZ) {
@@ -240,9 +240,9 @@ struct CactusCandidate {
 };
 
 namespace vegetation {
-    // Trouve les candidats pour la végétation
+    // Finds candidates for vegetation
 
-    // Trouve un candidat d'arbre
+    // Finds a tree candidate
     static void FindTreeCandidate(Vector<TreeCandidate>& trees, const Vector<S32>& heightMap,
                                  const Vector<Voxel>& blocks, const GenJob& job, U32 seed,
                                  U32 x, U32 z, U32 chunkSizeX, U32 chunkSizeY, BiomeType biome) {
@@ -265,7 +265,7 @@ namespace vegetation {
         }
     }
 
-    // Trouve un candidat de cactus
+    // Finds a cactus candidate
     static void FindCactusCandidate(Vector<CactusCandidate>& cacti, const Vector<S32>& heightMap,
                                    const Vector<Voxel>& blocks, const GenJob& job, U32 seed,
                                    U32 x, U32 z, U32 chunkSizeX, U32 chunkSizeY) {
@@ -311,7 +311,7 @@ namespace vegetation {
         }
     }
 
-    // Vérifie si une position de feuille est valide
+    // Checks if a leaf position is valid
     static bool IsValidLeafPosition(S32 lx, S32 lz, S32 dx, S32 dz, S32 radius, S32 ly) {
         constexpr U32 NX{VoxelChunk::SizeX}, NZ{VoxelChunk::SizeZ};
 
@@ -328,7 +328,7 @@ namespace vegetation {
         return true;
     }
 
-    // Place les feuilles d'un arbre
+    // Places the leaves of a tree
     static void PlaceTreeLeaves(Vector<Voxel>& blocks, const TreeCandidate& tree, U32 chunkSizeY) {
         S32 leavesStart{tree.y + static_cast<S32>(tree.height) - 3};
         S32 leavesEnd{tree.y + static_cast<S32>(tree.height) + 1};
@@ -354,7 +354,7 @@ namespace vegetation {
         }
     }
 
-    // Place un arbre
+    // Places a tree
     static void PlaceTree(Vector<Voxel>& blocks, const TreeCandidate& tree, U32 chunkSizeY) {
         // Place trunk
         for (U32 h{}; h < tree.height; ++h) {
@@ -367,17 +367,17 @@ namespace vegetation {
         PlaceTreeLeaves(blocks, tree, chunkSizeY);
     }
 
-    // Place un cactus
+    // Places a cactus
     static void PlaceCactus(Vector<Voxel>& blocks, const CactusCandidate& cactus, U32 chunkSizeY) {
         for (U32 h{}; h < cactus.height; ++h) {
             S32 cy{cactus.y + static_cast<S32>(h)};
             if (cy >= 0 && cy < static_cast<S32>(chunkSizeY)) {
-                blocks[VoxelIndex(cactus.x, cy, cactus.z)] = Voxel::Leaves; // Vert pour simuler le cactus
+                blocks[VoxelIndex(cactus.x, cy, cactus.z)] = Voxel::Leaves; // Green to simulate cactus
             }
         }
     }
 
-    // Place toute la végétation
+    // Places all vegetation
     static void PlaceAllVegetation(Vector<Voxel>& blocks,
                                   const Vector<TreeCandidate>& trees,
                                   const Vector<CactusCandidate>& cacti,
@@ -395,7 +395,6 @@ namespace vegetation {
 // ===== MAIN SYSTEM =====
 export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
 
-
     struct GenResult {
         EntityHandle h;
         Vector<Voxel> blocks;
@@ -410,13 +409,13 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
     static inline std::atomic<bool> s_Stop{false};
     static inline std::once_flag s_Once{};
 
-    // Génère un chunk complet
+    // Generates a full chunk
     static void GenerateChunk(const GenJob& job) {
         constexpr U32 NX{VoxelChunk::SizeX}, NY{VoxelChunk::SizeY}, NZ{VoxelChunk::SizeZ};
         Vector<Voxel> blocks{};
         blocks.resize(static_cast<USize>(NX) * NY * NZ);
 
-        // Étape 1: Générer la heightmap et les biomes
+        // Step 1: Generate heightmap and biomes
         Vector<S32> heightMap{};
         Vector<BiomeType> biomeMap{};
         heightMap.resize(NX * NZ);
@@ -424,18 +423,18 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
 
         terrain::GenerateHeightMap(heightMap, biomeMap, job, NX, NZ);
 
-        // Étape 2: Placer les blocs de terrain
+        // Step 2: Place the terrain blocks
         terrain::PlaceTerrainBlocks(blocks, heightMap, biomeMap, job, NX, NY, NZ);
 
-        // Étape 3: Trouver les candidats de végétation
+        // Step 3: Find vegetation candidates
         Vector<TreeCandidate> trees{};
         Vector<CactusCandidate> cacti{};
         vegetation::FindVegetationCandidates(trees, cacti, heightMap, biomeMap, blocks, job, NX, NY, NZ);
 
-        // Étape 4: Placer la végétation
+        // Step 4: Place the vegetation
         vegetation::PlaceAllVegetation(blocks, trees, cacti, NY);
 
-        // Étape 5: Envoyer le résultat
+        // Step 5: Send the result
         {
             std::lock_guard lk{s_ReadyMutex};
             s_Ready.push_back(GenResult{job.h, std::move(blocks)});
