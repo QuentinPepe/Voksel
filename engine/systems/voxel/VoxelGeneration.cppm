@@ -57,26 +57,348 @@ namespace noise {
         }
         return sum / std::max(0.0001f, norm);
     }
+
+    // Génère une valeur de biome simple et équilibrée
+    inline F32 biomeValue(F32 x, F32 z, F32 freq = 0.004f) {
+        F32 large = value2D(x * freq, z * freq);           // Grandes zones
+        F32 detail = value2D(x * freq * 3.0f, z * freq * 3.0f) * 0.3f; // Détails
+        return large + detail;
+    }
+
+    // Génère la hauteur de terrain basique
+    inline F32 terrainNoise(F32 x, F32 z, F32 freq = 0.025f) {
+        return fbm2D(x * freq, z * freq, 4u, 0.5f, 2.0f);
+    }
 }
 
+// ===== BIOMES =====
+enum class BiomeType : U32 {
+    Plains = 0,
+    Desert = 1
+};
+
+struct BiomeData {
+    BiomeType type;
+    F32 heightBase;
+    F32 heightAmp;
+    F32 treeChance;
+    Voxel surfaceBlock;
+    Voxel fillerBlock;
+    bool hasWater;
+};
+
+namespace biomes {
+    // Définition des données de biomes
+    static BiomeData GetBiomeData(BiomeType type) {
+        switch (type) {
+            case BiomeType::Plains:
+                return BiomeData{
+                    .type = BiomeType::Plains,
+                    .heightBase = 12.0f,
+                    .heightAmp = 10.0f,
+                    .treeChance = 0.05f,
+                    .surfaceBlock = Voxel::Grass,
+                    .fillerBlock = Voxel::Dirt,
+                    .hasWater = true
+                };
+            case BiomeType::Desert:
+                return BiomeData{
+                    .type = BiomeType::Desert,
+                    .heightBase = 14.0f,
+                    .heightAmp = 6.0f,
+                    .treeChance = 0.0f,
+                    .surfaceBlock = Voxel::Sand,
+                    .fillerBlock = Voxel::Sand,
+                    .hasWater = false
+                };
+        }
+        return GetBiomeData(BiomeType::Plains);
+    }
+
+    // Détermine le biome principal pour une position
+    static BiomeType GetPrimaryBiome(F32 x, F32 z) {
+        F32 biomeNoise = noise::biomeValue(x, z);
+        return (biomeNoise > 0.6f) ? BiomeType::Desert : BiomeType::Plains;
+    }
+
+    // Calcule le facteur de mélange entre biomes
+    static F32 GetBiomeBlendFactor(F32 x, F32 z, BiomeType targetBiome) {
+        F32 biomeNoise = noise::biomeValue(x, z);
+
+        if (targetBiome == BiomeType::Desert) {
+            if (biomeNoise > 0.7f) return 1.0f;
+            if (biomeNoise < 0.5f) return 0.0f;
+            return (biomeNoise - 0.5f) / 0.2f;
+        } else {
+            if (biomeNoise < 0.5f) return 1.0f;
+            if (biomeNoise > 0.7f) return 0.0f;
+            return 1.0f - ((biomeNoise - 0.5f) / 0.2f);
+        }
+    }
+
+    // Génère la hauteur pour un biome spécifique
+    static S32 GenerateBiomeHeight(F32 x, F32 z, const BiomeData& biome) {
+        F32 terrainNoise = noise::terrainNoise(x, z);
+        return static_cast<S32>(biome.heightBase + terrainNoise * biome.heightAmp);
+    }
+
+    // Calcule la hauteur finale avec mélange de biomes
+    static S32 CalculateBlendedHeight(F32 x, F32 z) {
+        BiomeType primaryBiome = GetPrimaryBiome(x, z);
+        BiomeData primaryData = GetBiomeData(primaryBiome);
+        S32 primaryHeight = GenerateBiomeHeight(x, z, primaryData);
+
+        // Vérifier si on est dans une zone de transition
+        BiomeType otherBiome = (primaryBiome == BiomeType::Plains) ? BiomeType::Desert : BiomeType::Plains;
+        F32 blendFactor = GetBiomeBlendFactor(x, z, otherBiome);
+
+        if (blendFactor > 0.0f) {
+            BiomeData otherData = GetBiomeData(otherBiome);
+            S32 otherHeight = GenerateBiomeHeight(x, z, otherData);
+            return static_cast<S32>(std::lerp(static_cast<F32>(primaryHeight),
+                                            static_cast<F32>(otherHeight),
+                                            blendFactor));
+        }
+
+        return primaryHeight;
+    }
+}
+
+struct GenJob {
+    EntityHandle h;
+    S32 cx;
+    S32 cy;
+    S32 cz;
+    Math::Vec3 origin;
+    F32 bs;
+};
+
+// ===== TERRAIN GENERATION =====
+namespace terrain {
+    // Place les blocs de base selon le biome
+    static void PlaceBaseBlocks(Vector<Voxel>& blocks, U32 x, U32 y, U32 z,
+                               S32 globalY, S32 height, const BiomeData& biome) {
+        Voxel blockType = Voxel::Air;
+
+        if (globalY < height - 3) {
+            blockType = Voxel::Stone;
+        } else if (globalY < height - 1) {
+            blockType = biome.fillerBlock;
+        } else if (globalY == height - 1) {
+            blockType = biome.surfaceBlock;
+        }
+
+        blocks[VoxelIndex(x, y, z)] = blockType;
+    }
+
+    // Génère une heightmap pour un chunk
+    static void GenerateHeightMap(Vector<S32>& heightMap, Vector<BiomeType>& biomeMap,
+                                 const GenJob& job, U32 chunkSizeX, U32 chunkSizeZ) {
+        for (U32 z{}; z < chunkSizeZ; ++z) {
+            for (U32 x{}; x < chunkSizeX; ++x) {
+                F32 wx{job.origin.x + static_cast<F32>(x) * job.bs};
+                F32 wz{job.origin.z + static_cast<F32>(z) * job.bs};
+
+                BiomeType biome = biomes::GetPrimaryBiome(wx, wz);
+                S32 height = biomes::CalculateBlendedHeight(wx, wz);
+
+                heightMap[x + z * chunkSizeX] = height;
+                biomeMap[x + z * chunkSizeX] = biome;
+            }
+        }
+    }
+
+    // Place tous les blocs de terrain
+    static void PlaceTerrainBlocks(Vector<Voxel>& blocks, const Vector<S32>& heightMap,
+                                  const Vector<BiomeType>& biomeMap, const GenJob& job,
+                                  U32 chunkSizeX, U32 chunkSizeY, U32 chunkSizeZ) {
+        for (U32 z{}; z < chunkSizeZ; ++z) {
+            for (U32 x{}; x < chunkSizeX; ++x) {
+                S32 height = heightMap[x + z * chunkSizeX];
+                BiomeType biome = biomeMap[x + z * chunkSizeX];
+                BiomeData biomeData = biomes::GetBiomeData(biome);
+
+                for (U32 y{}; y < chunkSizeY; ++y) {
+                    S32 globalY{job.cy * static_cast<S32>(chunkSizeY) + static_cast<S32>(y)};
+                    PlaceBaseBlocks(blocks, x, y, z, globalY, height, biomeData);
+                }
+            }
+        }
+    }
+}
+
+// ===== VEGETATION =====
+struct TreeCandidate {
+    S32 x, y, z;
+    U32 height;
+    BiomeType biome;
+};
+
+struct CactusCandidate {
+    S32 x, y, z;
+    U32 height;
+};
+
+namespace vegetation {
+    // Trouve les candidats pour la végétation
+
+    // Trouve un candidat d'arbre
+    static void FindTreeCandidate(Vector<TreeCandidate>& trees, const Vector<S32>& heightMap,
+                                 const Vector<Voxel>& blocks, const GenJob& job, U32 seed,
+                                 U32 x, U32 z, U32 chunkSizeX, U32 chunkSizeY, BiomeType biome) {
+        S32 offsetX{static_cast<S32>(seed % 5) - 2};
+        S32 offsetZ{static_cast<S32>((seed >> 8) % 5) - 2};
+        S32 treeX{static_cast<S32>(x) + offsetX};
+        S32 treeZ{static_cast<S32>(z) + offsetZ};
+
+        if (treeX >= 2 && treeX < static_cast<S32>(chunkSizeX) - 2){
+
+            S32 groundHeight{heightMap[treeX + treeZ * chunkSizeX]};
+            S32 treeY{groundHeight - job.cy * static_cast<S32>(chunkSizeY)};
+
+            if (treeY >= 0 && treeY < static_cast<S32>(chunkSizeY)) {
+                if (blocks[VoxelIndex(treeX, treeY - 1, treeZ)] == Voxel::Grass) {
+                    U32 treeHeight{4u + (seed >> 16) % 3u};
+                    trees.push_back(TreeCandidate{treeX, treeY, treeZ, treeHeight, biome});
+                }
+            }
+        }
+    }
+
+    // Trouve un candidat de cactus
+    static void FindCactusCandidate(Vector<CactusCandidate>& cacti, const Vector<S32>& heightMap,
+                                   const Vector<Voxel>& blocks, const GenJob& job, U32 seed,
+                                   U32 x, U32 z, U32 chunkSizeX, U32 chunkSizeY) {
+        S32 offsetX{static_cast<S32>(seed % 3) - 1};
+        S32 offsetZ{static_cast<S32>((seed >> 8) % 3) - 1};
+        S32 cactusX{static_cast<S32>(x) + offsetX};
+        S32 cactusZ{static_cast<S32>(z) + offsetZ};
+
+        if (cactusX >= 1 && cactusX < static_cast<S32>(chunkSizeX) - 1){
+
+            S32 groundHeight{heightMap[cactusX + cactusZ * chunkSizeX]};
+            S32 cactusY{groundHeight - job.cy * static_cast<S32>(chunkSizeY)};
+
+            if (cactusY >= 0 && cactusY < static_cast<S32>(chunkSizeY)) {
+                if (blocks[VoxelIndex(cactusX, cactusY - 1, cactusZ)] == Voxel::Sand) {
+                    U32 cactusHeight{2u + (seed >> 20) % 3u};
+                    cacti.push_back(CactusCandidate{cactusX, cactusY, cactusZ, cactusHeight});
+                }
+            }
+        }
+    }
+
+    static void FindVegetationCandidates(Vector<TreeCandidate>& trees, Vector<CactusCandidate>& cacti,
+                                        const Vector<S32>& heightMap, const Vector<BiomeType>& biomeMap,
+                                        const Vector<Voxel>& blocks, const GenJob& job,
+                                        U32 chunkSizeX, U32 chunkSizeY, U32 chunkSizeZ) {
+        for (U32 z{4}; z < chunkSizeZ - 4; z += 4) {
+            for (U32 x{4}; x < chunkSizeX - 4; x += 4) {
+                F32 wx{job.origin.x + static_cast<F32>(x) * job.bs};
+                F32 wz{job.origin.z + static_cast<F32>(z) * job.bs};
+                BiomeType biome = biomeMap[x + z * chunkSizeX];
+                BiomeData biomeData = biomes::GetBiomeData(biome);
+
+                U32 seed{noise::wang(static_cast<U32>(wx * 73) ^ static_cast<U32>(wz * 97))};
+                F32 vegChance{static_cast<F32>(seed % 100) / 100.0f};
+
+                if (biome == BiomeType::Plains && vegChance < biomeData.treeChance) {
+                    FindTreeCandidate(trees, heightMap, blocks, job, seed, x, z, chunkSizeX, chunkSizeY, biome);
+                } else if (biome == BiomeType::Desert && vegChance < 0.02f) {
+                    FindCactusCandidate(cacti, heightMap, blocks, job, seed, x, z, chunkSizeX, chunkSizeY);
+                }
+            }
+        }
+    }
+
+    // Vérifie si une position de feuille est valide
+    static bool IsValidLeafPosition(S32 lx, S32 lz, S32 dx, S32 dz, S32 radius, S32 ly) {
+        constexpr U32 NX{VoxelChunk::SizeX}, NZ{VoxelChunk::SizeZ};
+
+        if (lx < 0 || lx >= static_cast<S32>(NX) || lz < 0 || lz >= static_cast<S32>(NZ)) {
+            return false;
+        }
+
+        // Skip corners for more natural shape
+        if (radius == 2 && std::abs(dx) == 2 && std::abs(dz) == 2) {
+            U32 cornerSeed{noise::wang(static_cast<U32>(lx * 31 + ly * 37 + lz * 41))};
+            return (cornerSeed % 100) <= 40; // 40% chance to place corners
+        }
+
+        return true;
+    }
+
+    // Place les feuilles d'un arbre
+    static void PlaceTreeLeaves(Vector<Voxel>& blocks, const TreeCandidate& tree, U32 chunkSizeY) {
+        S32 leavesStart{tree.y + static_cast<S32>(tree.height) - 3};
+        S32 leavesEnd{tree.y + static_cast<S32>(tree.height) + 1};
+
+        for (S32 ly{leavesStart}; ly <= leavesEnd; ++ly) {
+            if (ly < 0 || ly >= static_cast<S32>(chunkSizeY)) continue;
+
+            S32 radius{(ly == leavesEnd || ly == leavesEnd - 1) ? 1 : 2};
+
+            for (S32 dx{-radius}; dx <= radius; ++dx) {
+                for (S32 dz{-radius}; dz <= radius; ++dz) {
+                    S32 lx{tree.x + dx};
+                    S32 lz{tree.z + dz};
+
+                    if (IsValidLeafPosition(lx, lz, dx, dz, radius, ly)) {
+                        U32 idx = static_cast<U32>(VoxelIndex(lx, ly, lz));
+                        if (blocks[idx] == Voxel::Air) {
+                            blocks[idx] = Voxel::Leaves;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Place un arbre
+    static void PlaceTree(Vector<Voxel>& blocks, const TreeCandidate& tree, U32 chunkSizeY) {
+        // Place trunk
+        for (U32 h{}; h < tree.height; ++h) {
+            S32 ty{tree.y + static_cast<S32>(h)};
+            if (ty >= 0 && ty < static_cast<S32>(chunkSizeY)) {
+                blocks[VoxelIndex(tree.x, ty, tree.z)] = Voxel::Log;
+            }
+        }
+
+        PlaceTreeLeaves(blocks, tree, chunkSizeY);
+    }
+
+    // Place un cactus
+    static void PlaceCactus(Vector<Voxel>& blocks, const CactusCandidate& cactus, U32 chunkSizeY) {
+        for (U32 h{}; h < cactus.height; ++h) {
+            S32 cy{cactus.y + static_cast<S32>(h)};
+            if (cy >= 0 && cy < static_cast<S32>(chunkSizeY)) {
+                blocks[VoxelIndex(cactus.x, cy, cactus.z)] = Voxel::Leaves; // Vert pour simuler le cactus
+            }
+        }
+    }
+
+    // Place toute la végétation
+    static void PlaceAllVegetation(Vector<Voxel>& blocks,
+                                  const Vector<TreeCandidate>& trees,
+                                  const Vector<CactusCandidate>& cacti,
+                                  U32 chunkSizeY) {
+        for (const auto& tree : trees) {
+            PlaceTree(blocks, tree, chunkSizeY);
+        }
+
+        for (const auto& cactus : cacti) {
+            PlaceCactus(blocks, cactus, chunkSizeY);
+        }
+    }
+}
+
+// ===== MAIN SYSTEM =====
 export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
-    struct GenJob {
-        EntityHandle h;
-        S32 cx;
-        S32 cy;
-        S32 cz;
-        Math::Vec3 origin;
-        F32 bs;
-    };
+
 
     struct GenResult {
         EntityHandle h;
         Vector<Voxel> blocks;
-    };
-
-    struct TreeCandidate {
-        S32 x, y, z;
-        U32 height;
     };
 
     static inline Vector<std::thread> s_Workers{};
@@ -87,6 +409,38 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
     static inline std::deque<GenResult> s_Ready{};
     static inline std::atomic<bool> s_Stop{false};
     static inline std::once_flag s_Once{};
+
+    // Génère un chunk complet
+    static void GenerateChunk(const GenJob& job) {
+        constexpr U32 NX{VoxelChunk::SizeX}, NY{VoxelChunk::SizeY}, NZ{VoxelChunk::SizeZ};
+        Vector<Voxel> blocks{};
+        blocks.resize(static_cast<USize>(NX) * NY * NZ);
+
+        // Étape 1: Générer la heightmap et les biomes
+        Vector<S32> heightMap{};
+        Vector<BiomeType> biomeMap{};
+        heightMap.resize(NX * NZ);
+        biomeMap.resize(NX * NZ);
+
+        terrain::GenerateHeightMap(heightMap, biomeMap, job, NX, NZ);
+
+        // Étape 2: Placer les blocs de terrain
+        terrain::PlaceTerrainBlocks(blocks, heightMap, biomeMap, job, NX, NY, NZ);
+
+        // Étape 3: Trouver les candidats de végétation
+        Vector<TreeCandidate> trees{};
+        Vector<CactusCandidate> cacti{};
+        vegetation::FindVegetationCandidates(trees, cacti, heightMap, biomeMap, blocks, job, NX, NY, NZ);
+
+        // Étape 4: Placer la végétation
+        vegetation::PlaceAllVegetation(blocks, trees, cacti, NY);
+
+        // Étape 5: Envoyer le résultat
+        {
+            std::lock_guard lk{s_ReadyMutex};
+            s_Ready.push_back(GenResult{job.h, std::move(blocks)});
+        }
+    }
 
     static void StartPool(U32 threads) {
         std::call_once(s_Once, [threads]() {
@@ -103,128 +457,7 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
                             s_Jobs.pop_front();
                         }
 
-                        constexpr U32 NX{VoxelChunk::SizeX}, NY{VoxelChunk::SizeY}, NZ{VoxelChunk::SizeZ};
-                        Vector<Voxel> blocks{};
-                        blocks.resize(static_cast<USize>(NX) * NY * NZ);
-
-                        const F32 freq{0.025f};
-                        const F32 hBase{12.0f};
-                        const F32 hAmp{10.0f};
-
-                        // First pass: generate terrain
-                        Vector<S32> heightMap{};
-                        heightMap.resize(NX * NZ);
-
-                        for (U32 z{}; z < NZ; ++z) {
-                            for (U32 x{}; x < NX; ++x) {
-                                F32 wx{job.origin.x + static_cast<F32>(x) * job.bs};
-                                F32 wz{job.origin.z + static_cast<F32>(z) * job.bs};
-                                F32 n{noise::fbm2D(wx * freq, wz * freq, 4u, 0.5f, 2.0f)};
-                                S32 h{static_cast<S32>(hBase + n * hAmp)};
-                                heightMap[x + z * NX] = h;
-
-                                for (U32 y{}; y < NY; ++y) {
-                                    S32 gy{job.cy * static_cast<S32>(NY) + static_cast<S32>(y)};
-                                    Voxel v{Voxel::Air};
-                                    if (gy < h - 3) v = Voxel::Stone;
-                                    else if (gy < h - 1) v = Voxel::Dirt;
-                                    else if (gy == h - 1) v = Voxel::Grass;
-                                    blocks[VoxelIndex(x, y, z)] = v;
-                                }
-                            }
-                        }
-
-                        // Second pass: place trees using Minecraft algorithm
-                        Vector<TreeCandidate> trees{};
-
-                        // Tree generation probability grid (similar to Minecraft's approach)
-                        for (U32 z{4}; z < NZ - 4; z += 4) {
-                            for (U32 x{4}; x < NX - 4; x += 4) {
-                                F32 wx{job.origin.x + static_cast<F32>(x) * job.bs};
-                                F32 wz{job.origin.z + static_cast<F32>(z) * job.bs};
-
-                                // Use noise for tree placement probability
-                                U32 seed{noise::wang(static_cast<U32>(wx * 73) ^ static_cast<U32>(wz * 97))};
-                                F32 treeChance{static_cast<F32>(seed % 100) / 100.0f};
-
-                                if (treeChance < 0.05f) { // 5% chance per grid cell
-                                    // Add some randomness to position within grid cell
-                                    S32 offsetX{static_cast<S32>(seed % 5) - 2};
-                                    S32 offsetZ{static_cast<S32>((seed >> 8) % 5) - 2};
-                                    S32 treeX{static_cast<S32>(x) + offsetX};
-                                    S32 treeZ{static_cast<S32>(z) + offsetZ};
-
-                                    if (treeX >= 2 && treeX < static_cast<S32>(NX) - 2 &&
-                                        treeZ >= 2 && treeZ < static_cast<S32>(NZ) - 2) {
-
-                                        S32 groundHeight{heightMap[treeX + treeZ * NX]};
-                                        S32 treeY{groundHeight - job.cy * static_cast<S32>(NY)};
-
-                                        // Check if tree base is in this chunk and on grass
-                                        if (treeY >= 0 && treeY < static_cast<S32>(NY)) {
-                                            if (blocks[VoxelIndex(treeX, treeY - 1, treeZ)] == Voxel::Grass) {
-                                                // Random tree height between 4-6 blocks (Minecraft oak tree)
-                                                U32 treeHeight{4u + (seed >> 16) % 3u};
-                                                trees.push_back(TreeCandidate{treeX, treeY, treeZ, treeHeight});
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Place trees
-                        for (auto const& tree : trees) {
-                            // Place trunk
-                            for (U32 h{}; h < tree.height; ++h) {
-                                S32 ty{tree.y + static_cast<S32>(h)};
-                                if (ty >= 0 && ty < static_cast<S32>(NY)) {
-                                    blocks[VoxelIndex(tree.x, ty, tree.z)] = (Voxel::Log);
-                                }
-                            }
-
-                            // Place leaves (Minecraft oak tree pattern)
-                            S32 leavesStart{tree.y + static_cast<S32>(tree.height) - 3};
-                            S32 leavesEnd{tree.y + static_cast<S32>(tree.height) + 1};
-
-                            for (S32 ly{leavesStart}; ly <= leavesEnd; ++ly) {
-                                if (ly < 0 || ly >= static_cast<S32>(NY)) continue;
-
-                                // Determine radius based on height in leaves
-                                S32 radius{2};
-                                if (ly == leavesEnd || ly == leavesEnd - 1) {
-                                    radius = 1; // Smaller radius at top
-                                }
-
-                                for (S32 dx{-radius}; dx <= radius; ++dx) {
-                                    for (S32 dz{-radius}; dz <= radius; ++dz) {
-                                        S32 lx{tree.x + dx};
-                                        S32 lz{tree.z + dz};
-
-                                        if (lx < 0 || lx >= static_cast<S32>(NX) ||
-                                            lz < 0 || lz >= static_cast<S32>(NZ)) continue;
-
-                                        // Skip corners for more natural shape
-                                        if (radius == 2 && std::abs(dx) == 2 && std::abs(dz) == 2) {
-                                            // Random chance to place corner leaves
-                                            U32 cornerSeed{noise::wang(static_cast<U32>(lx * 31 + ly * 37 + lz * 41))};
-                                            if ((cornerSeed % 100) > 40) continue; // 60% chance to skip corners
-                                        }
-
-                                        // Don't overwrite wood
-                                        U32 idx = static_cast<U32>(VoxelIndex(lx, ly, lz));
-                                        if (blocks[idx] == Voxel::Air) {
-                                            blocks[idx] = (Voxel::Leaves);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        {
-                            std::lock_guard lk{s_ReadyMutex};
-                            s_Ready.push_back(GenResult{job.h, std::move(blocks)});
-                        }
+                        GenerateChunk(job);
                     }
                 });
             }
