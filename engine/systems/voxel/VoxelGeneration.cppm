@@ -57,7 +57,29 @@ namespace noise {
         }
         return sum / std::max(0.0001f, norm);
     }
+
+    // Génère la température/humidité pour déterminer les biomes
+    inline F32 biomeValue(F32 x, F32 z, F32 freq = 0.005f) {
+        return fbm2D(x * freq, z * freq, 3u, 0.5f, 2.0f);
+    }
 }
+
+// Énumération des biomes
+enum class BiomeType : U32 {
+    Plains = 0,
+    Desert = 1
+};
+
+// Structure de biome avec ses paramètres
+struct BiomeData {
+    BiomeType type;
+    F32 heightBase;
+    F32 heightAmp;
+    F32 treeChance;
+    Voxel surfaceBlock;
+    Voxel fillerBlock;
+    bool hasWater;
+};
 
 export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
     struct GenJob {
@@ -77,6 +99,12 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
     struct TreeCandidate {
         S32 x, y, z;
         U32 height;
+        BiomeType biome;
+    };
+
+    struct CactusCandidate {
+        S32 x, y, z;
+        U32 height;
     };
 
     static inline Vector<std::thread> s_Workers{};
@@ -87,6 +115,61 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
     static inline std::deque<GenResult> s_Ready{};
     static inline std::atomic<bool> s_Stop{false};
     static inline std::once_flag s_Once{};
+
+    // Définition des biomes
+    static BiomeData GetBiomeData(BiomeType type) {
+        switch (type) {
+            case BiomeType::Plains:
+                return BiomeData{
+                    .type = BiomeType::Plains,
+                    .heightBase = 12.0f,
+                    .heightAmp = 10.0f,
+                    .treeChance = 0.05f,
+                    .surfaceBlock = Voxel::Grass,
+                    .fillerBlock = Voxel::Dirt,
+                    .hasWater = true
+                };
+            case BiomeType::Desert:
+                return BiomeData{
+                    .type = BiomeType::Desert,
+                    .heightBase = 14.0f,
+                    .heightAmp = 6.0f,    // Terrain plus plat
+                    .treeChance = 0.0f,   // Pas d'arbres
+                    .surfaceBlock = Voxel::Sand,
+                    .fillerBlock = Voxel::Sand,
+                    .hasWater = false     // Pas de lacs
+                };
+        }
+        return GetBiomeData(BiomeType::Plains); // Fallback
+    }
+
+    // Détermine le biome basé sur les coordonnées (équilibré)
+    static BiomeType GetBiome(F32 x, F32 z) {
+        F32 biomeNoise = noise::biomeValue(x, z);
+
+        // Valeur > 0.0 = Désert, sinon Plaines (équilibré 50/50)
+        if (biomeNoise > 0.0f) {
+            return BiomeType::Desert;
+        }
+        return BiomeType::Plains;
+    }
+
+    // Calcule la transition entre biomes (ajustée)
+    static F32 GetBiomeBlend(F32 x, F32 z, BiomeType targetBiome) {
+        F32 biomeNoise = noise::biomeValue(x, z);
+
+        if (targetBiome == BiomeType::Desert) {
+            // Transition douce vers le désert
+            if (biomeNoise > 0.1f) return 1.0f;
+            if (biomeNoise < -0.1f) return 0.0f;
+            return (biomeNoise + 0.1f) / 0.2f; // Transition sur 0.2 unité
+        } else {
+            // Transition vers les plaines
+            if (biomeNoise < -0.1f) return 1.0f;
+            if (biomeNoise > 0.1f) return 0.0f;
+            return 1.0f - ((biomeNoise + 0.1f) / 0.2f);
+        }
+    }
 
     static void StartPool(U32 threads) {
         std::call_once(s_Once, [threads]() {
@@ -108,47 +191,75 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
                         blocks.resize(static_cast<USize>(NX) * NY * NZ);
 
                         const F32 freq{0.025f};
-                        const F32 hBase{12.0f};
-                        const F32 hAmp{10.0f};
 
-                        // First pass: generate terrain
+                        // First pass: generate terrain with biomes
                         Vector<S32> heightMap{};
+                        Vector<BiomeType> biomeMap{};
                         heightMap.resize(NX * NZ);
+                        biomeMap.resize(NX * NZ);
 
                         for (U32 z{}; z < NZ; ++z) {
                             for (U32 x{}; x < NX; ++x) {
                                 F32 wx{job.origin.x + static_cast<F32>(x) * job.bs};
                                 F32 wz{job.origin.z + static_cast<F32>(z) * job.bs};
+
+                                // Déterminer le biome principal
+                                BiomeType primaryBiome = GetBiome(wx, wz);
+                                biomeMap[x + z * NX] = primaryBiome;
+
+                                // Récupérer les données du biome
+                                BiomeData biomeData = GetBiomeData(primaryBiome);
+
+                                // Générer la hauteur basée sur le biome
                                 F32 n{noise::fbm2D(wx * freq, wz * freq, 4u, 0.5f, 2.0f)};
-                                S32 h{static_cast<S32>(hBase + n * hAmp)};
+                                S32 h{static_cast<S32>(biomeData.heightBase + n * biomeData.heightAmp)};
+
+                                // Transition entre biomes pour des bordures douces
+                                if (primaryBiome != BiomeType::Plains) {
+                                    F32 plainsBlend = GetBiomeBlend(wx, wz, BiomeType::Plains);
+                                    if (plainsBlend > 0.0f) {
+                                        BiomeData plainsData = GetBiomeData(BiomeType::Plains);
+                                        S32 plainsHeight = static_cast<S32>(plainsData.heightBase + n * plainsData.heightAmp);
+                                        h = static_cast<S32>(std::lerp(static_cast<F32>(h), static_cast<F32>(plainsHeight), plainsBlend));
+                                    }
+                                }
+
                                 heightMap[x + z * NX] = h;
 
+                                // Placer les blocs selon le biome
                                 for (U32 y{}; y < NY; ++y) {
                                     S32 gy{job.cy * static_cast<S32>(NY) + static_cast<S32>(y)};
                                     Voxel v{Voxel::Air};
-                                    if (gy < h - 3) v = Voxel::Stone;
-                                    else if (gy < h - 1) v = Voxel::Dirt;
-                                    else if (gy == h - 1) v = Voxel::Grass;
+
+                                    if (gy < h - 3) {
+                                        v = Voxel::Stone;
+                                    } else if (gy < h - 1) {
+                                        v = biomeData.fillerBlock;
+                                    } else if (gy == h - 1) {
+                                        v = biomeData.surfaceBlock;
+                                    }
+
                                     blocks[VoxelIndex(x, y, z)] = v;
                                 }
                             }
                         }
 
-                        // Second pass: place trees using Minecraft algorithm
+                        // Second pass: place vegetation based on biome
                         Vector<TreeCandidate> trees{};
+                        Vector<CactusCandidate> cacti{};
 
-                        // Tree generation probability grid (similar to Minecraft's approach)
                         for (U32 z{4}; z < NZ - 4; z += 4) {
                             for (U32 x{4}; x < NX - 4; x += 4) {
                                 F32 wx{job.origin.x + static_cast<F32>(x) * job.bs};
                                 F32 wz{job.origin.z + static_cast<F32>(z) * job.bs};
+                                BiomeType biome = biomeMap[x + z * NX];
+                                BiomeData biomeData = GetBiomeData(biome);
 
-                                // Use noise for tree placement probability
                                 U32 seed{noise::wang(static_cast<U32>(wx * 73) ^ static_cast<U32>(wz * 97))};
-                                F32 treeChance{static_cast<F32>(seed % 100) / 100.0f};
+                                F32 vegChance{static_cast<F32>(seed % 100) / 100.0f};
 
-                                if (treeChance < 0.05f) { // 5% chance per grid cell
-                                    // Add some randomness to position within grid cell
+                                if (biome == BiomeType::Plains && vegChance < biomeData.treeChance) {
+                                    // Placer des arbres dans les plaines
                                     S32 offsetX{static_cast<S32>(seed % 5) - 2};
                                     S32 offsetZ{static_cast<S32>((seed >> 8) % 5) - 2};
                                     S32 treeX{static_cast<S32>(x) + offsetX};
@@ -160,12 +271,30 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
                                         S32 groundHeight{heightMap[treeX + treeZ * NX]};
                                         S32 treeY{groundHeight - job.cy * static_cast<S32>(NY)};
 
-                                        // Check if tree base is in this chunk and on grass
                                         if (treeY >= 0 && treeY < static_cast<S32>(NY)) {
                                             if (blocks[VoxelIndex(treeX, treeY - 1, treeZ)] == Voxel::Grass) {
-                                                // Random tree height between 4-6 blocks (Minecraft oak tree)
                                                 U32 treeHeight{4u + (seed >> 16) % 3u};
-                                                trees.push_back(TreeCandidate{treeX, treeY, treeZ, treeHeight});
+                                                trees.push_back(TreeCandidate{treeX, treeY, treeZ, treeHeight, biome});
+                                            }
+                                        }
+                                    }
+                                } else if (biome == BiomeType::Desert && vegChance < 0.02f) {
+                                    // Placer des cactus dans le désert (2% de chance)
+                                    S32 offsetX{static_cast<S32>(seed % 3) - 1};
+                                    S32 offsetZ{static_cast<S32>((seed >> 8) % 3) - 1};
+                                    S32 cactusX{static_cast<S32>(x) + offsetX};
+                                    S32 cactusZ{static_cast<S32>(z) + offsetZ};
+
+                                    if (cactusX >= 1 && cactusX < static_cast<S32>(NX) - 1 &&
+                                        cactusZ >= 1 && cactusZ < static_cast<S32>(NZ) - 1) {
+
+                                        S32 groundHeight{heightMap[cactusX + cactusZ * NX]};
+                                        S32 cactusY{groundHeight - job.cy * static_cast<S32>(NY)};
+
+                                        if (cactusY >= 0 && cactusY < static_cast<S32>(NY)) {
+                                            if (blocks[VoxelIndex(cactusX, cactusY - 1, cactusZ)] == Voxel::Sand) {
+                                                U32 cactusHeight{2u + (seed >> 20) % 3u}; // 2-4 blocs de haut
+                                                cacti.push_back(CactusCandidate{cactusX, cactusY, cactusZ, cactusHeight});
                                             }
                                         }
                                     }
@@ -173,13 +302,13 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
                             }
                         }
 
-                        // Place trees
+                        // Place trees (Plains biome)
                         for (auto const& tree : trees) {
                             // Place trunk
                             for (U32 h{}; h < tree.height; ++h) {
                                 S32 ty{tree.y + static_cast<S32>(h)};
                                 if (ty >= 0 && ty < static_cast<S32>(NY)) {
-                                    blocks[VoxelIndex(tree.x, ty, tree.z)] = (Voxel::Log);
+                                    blocks[VoxelIndex(tree.x, ty, tree.z)] = Voxel::Log;
                                 }
                             }
 
@@ -214,9 +343,20 @@ export class VoxelGenerationSystem : public System<VoxelGenerationSystem> {
                                         // Don't overwrite wood
                                         U32 idx = static_cast<U32>(VoxelIndex(lx, ly, lz));
                                         if (blocks[idx] == Voxel::Air) {
-                                            blocks[idx] = (Voxel::Leaves);
+                                            blocks[idx] = Voxel::Leaves;
                                         }
                                     }
+                                }
+                            }
+                        }
+
+                        // Place cacti (Desert biome)
+                        for (auto const& cactus : cacti) {
+                            for (U32 h{}; h < cactus.height; ++h) {
+                                S32 cy{cactus.y + static_cast<S32>(h)};
+                                if (cy >= 0 && cy < static_cast<S32>(NY)) {
+                                    // Utilise Log temporairement (vous pourriez ajouter Voxel::Cactus)
+                                    blocks[VoxelIndex(cactus.x, cy, cactus.z)] = Voxel::Leaves; // Vert pour simuler le cactus
                                 }
                             }
                         }
