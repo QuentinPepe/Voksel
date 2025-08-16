@@ -28,7 +28,6 @@ namespace detail {
 
 namespace {
     enum Face : U32 { NX, PX, NY, PY, NZ, PZ };
-    struct MaterialDef { std::array<U32, 6> face; };
 
     constexpr U32 TILE_DIRT{0u};
     constexpr U32 TILE_GRASS_SIDE{1u};
@@ -38,17 +37,11 @@ namespace {
     constexpr U32 TILE_LOG_TOP{5u};
     constexpr U32 TILE_LEAVES{6u};
 
-    constexpr std::array<U32, 6> MakeBlock(U32 tile) {
-        return {tile, tile, tile, tile, tile, tile};
-    }
+    struct MaterialDef { std::array<U32, 6> face; };
 
-    constexpr std::array<U32, 6> MakeBlock(U32 tile, U32 tileTopAndBottom) {
-        return {tile, tile, tileTopAndBottom, tileTopAndBottom, tile, tile};
-    }
-
-    constexpr std::array<U32, 6> MakeBlock(U32 tileTop, U32 tileBottom, U32 tileSide) {
-        return {tileSide, tileSide, tileBottom, tileTop, tileSide, tileSide};
-    }
+    constexpr std::array<U32, 6> MakeBlock(U32 tile) { return {tile, tile, tile, tile, tile, tile}; }
+    constexpr std::array<U32, 6> MakeBlock(U32 tile, U32 tileTopAndBottom) { return {tile, tile, tileTopAndBottom, tileTopAndBottom, tile, tile}; }
+    constexpr std::array<U32, 6> MakeBlock(U32 tileTop, U32 tileBottom, U32 tileSide) { return {tileSide, tileSide, tileBottom, tileTop, tileSide, tileSide}; }
 
     constexpr MaterialDef kMatLUT[]{
         {{0,0,0,0,0,0}},
@@ -71,6 +64,12 @@ namespace {
              | (static_cast<U64>(static_cast<S64>(y) + static_cast<S64>(B)) << 21)
              | (static_cast<U64>(static_cast<S64>(z) + static_cast<S64>(B)) << 42);
     }
+
+    // key packing: 0 = empty, otherwise (tile+1) | BACK_BIT
+    constexpr U32 BACK_BIT{0x80000000u};
+    inline U32 PackMask(U32 tile, bool back) { return (tile + 1u) | (back ? BACK_BIT : 0u); }
+    inline bool MaskBack(U32 key) { return (key & BACK_BIT) != 0u; }
+    inline U32 MaskTile(U32 key) { return (key & ~BACK_BIT) - 1u; }
 }
 
 export class VoxelMeshingSystem : public System<VoxelMeshingSystem> {
@@ -98,6 +97,7 @@ public:
         const USize kCount{static_cast<USize>(VoxelChunk::SizeX) * VoxelChunk::SizeY * VoxelChunk::SizeZ};
 
         UnorderedMap<U64, VoxelChunk const*> chunkMap{};
+        chunkMap.reserve(chunkStore->Size());
         for (auto [h,c] : *chunkStore) {
             if (c.blocks.size() != kCount) continue;
             U64 k{PackKey(static_cast<S32>(c.cx), static_cast<S32>(c.cy), static_cast<S32>(c.cz))};
@@ -115,6 +115,7 @@ public:
 
         struct Item { F32 d2; EntityHandle h; };
         Vector<Item> dirty{};
+        dirty.reserve(chunkStore->Size());
         for (auto [h,c] : *chunkStore) {
             if (!c.dirty || c.generating || c.blocks.size() != kCount) continue;
             Math::Vec3 center{c.origin.x + 0.5f * sx, c.origin.y + 0.5f * sy, c.origin.z + 0.5f * sz};
@@ -122,11 +123,12 @@ public:
         }
 
         if (dirty.empty()) return;
-        std::sort(dirty.begin(), dirty.end(), [](Item const& a, Item const& b){ return a.d2 < b.d2; });
+        std::ranges::sort(dirty, {}, &Item::d2);
 
         U32 left{sc->meshBudget};
         for (auto const& it : dirty) {
             if (left == 0u) break;
+
             auto* mesh{world->GetComponent<VoxelMesh>(it.h)};
             auto const* chunk{world->GetComponent<VoxelChunk>(it.h)};
             if (!mesh || !chunk || !chunk->dirty) continue;
@@ -142,7 +144,8 @@ public:
             U32 reserveCount{12u * static_cast<U32>(NX*NY + NY*NZ + NX*NZ)};
             mesh->cpuVertices.reserve(reserveCount);
 
-            VoxelChunk const* nb[3][3][3]{};
+            VoxelChunk const* nbChunk[3][3][3]{};
+            Voxel const* nbData[3][3][3]{};
             for (S32 dz{-1}; dz<=1; ++dz) {
                 for (S32 dy{-1}; dy<=1; ++dy) {
                     for (S32 dx{-1}; dx<=1; ++dx) {
@@ -150,7 +153,9 @@ public:
                         S32 ccy{static_cast<S32>(chunk->cy) + dy};
                         S32 ccz{static_cast<S32>(chunk->cz) + dz};
                         auto itn{chunkMap.find(PackKey(ccx,ccy,ccz))};
-                        nb[dx+1][dy+1][dz+1] = (itn==chunkMap.end()? nullptr : itn->second);
+                        VoxelChunk const* ch{(itn==chunkMap.end()? nullptr : itn->second)};
+                        nbChunk[dx+1][dy+1][dz+1] = ch;
+                        nbData[dx+1][dy+1][dz+1] = ch ? ch->blocks.data() : nullptr;
                     }
                 }
             }
@@ -160,9 +165,9 @@ public:
                 if (lx < 0) { nx = -1; lx += NX; } else if (lx >= NX) { nx = 1; lx -= NX; }
                 if (ly < 0) { ny = -1; ly += NY; } else if (ly >= NY) { ny = 1; ly -= NY; }
                 if (lz < 0) { nz = -1; lz += NZ; } else if (lz >= NZ) { nz = 1; lz -= NZ; }
-                VoxelChunk const* ch{nb[nx+1][ny+1][nz+1]};
-                if (!ch) return Voxel::Air;
-                return ch->blocks[VoxelIndex(static_cast<U32>(lx), static_cast<U32>(ly), static_cast<U32>(lz))];
+                Voxel const* data{nbData[nx+1][ny+1][nz+1]};
+                if (!data) return Voxel::Air;
+                return data[VoxelIndex(static_cast<U32>(lx), static_cast<U32>(ly), static_cast<U32>(lz))];
             };
 
             auto makePos = [&](S32 gx, S32 gy, S32 gz) -> Math::Vec3 {
@@ -176,72 +181,84 @@ public:
                 return Math::Vec3{static_cast<F32>(X), static_cast<F32>(Y), static_cast<F32>(Z)};
             };
 
+            // Greedy meshing with packed mask (branch-minimized)
             auto greedyAxis = [&](S32 d) {
                 S32 dims[3]{NX,NY,NZ};
                 S32 u{(d + 1) % 3};
                 S32 v{(d + 2) % 3};
-                struct Cell { U32 tile; bool back; bool set; };
-                static thread_local Vector<Cell> mask;
+
+                struct MaskRow { U32* ptr; };
+                static thread_local Vector<U32> mask;
                 USize maskSize{static_cast<USize>(dims[u] * dims[v])};
                 if (mask.size() < maskSize) mask.resize(maskSize);
+                std::fill(mask.begin(), mask.begin() + maskSize, 0u);
+
                 S32 x[3]{0,0,0};
                 for (x[d]=0; x[d] <= dims[d]; ++x[d]) {
-                    S32 n{};
+                    U32* m{mask.data()};
                     for (x[v]=0; x[v] < dims[v]; ++x[v]) {
                         for (x[u]=0; x[u] < dims[u]; ++x[u]) {
                             S32 ax{x[0]}, ay{x[1]}, az{x[2]};
-                            S32 bx{x[0]}, by{x[1]}, bz{x[2]};
+                            S32 bx{ax}, by{ay}, bz{az};
                             if (d==0) --ax; else if (d==1) --ay; else --az;
+
                             Voxel va{sample(ax,ay,az)};
                             Voxel vb{sample(bx,by,bz)};
                             bool sa{va != Voxel::Air};
                             bool sb{vb != Voxel::Air};
-                            if (sa == sb) { mask[static_cast<USize>(n)] = Cell{0u,false,false}; }
-                            else {
+
+                            if (sa != sb) {
                                 bool back{!sa};
                                 Voxel owner{back ? vb : va};
                                 U32 face{FaceOf(d, back)};
                                 U32 tile{kMatLUT[static_cast<U32>(owner)].face[face]};
-                                mask[static_cast<USize>(n)] = Cell{tile, back, true};
+                                *m = PackMask(tile, back);
+                            } else {
+                                *m = 0u;
                             }
-                            ++n;
+                            ++m;
                         }
                     }
+
                     S32 j{};
                     while (j < dims[v]) {
                         S32 i{};
                         while (i < dims[u]) {
-                            Cell c{mask[static_cast<USize>(i + j * dims[u])]};
-                            if (!c.set) { ++i; continue; }
+                            U32 key{mask[static_cast<USize>(i + j * dims[u])]};
+                            if (key == 0u) { ++i; continue; }
+
                             S32 w{1};
                             while (i + w < dims[u]) {
-                                Cell cc{mask[static_cast<USize>(i + w + j * dims[u])]};
-                                if (!(cc.set && cc.back == c.back && cc.tile == c.tile)) break;
+                                if (mask[static_cast<USize>(i + w + j * dims[u])] != key) break;
                                 ++w;
                             }
+
                             S32 h{1}; bool extend{true};
                             while (j + h < dims[v] && extend) {
                                 for (S32 k{}; k < w; ++k) {
-                                    Cell cc{mask[static_cast<USize>(i + k + (j + h) * dims[u])]};
-                                    if (!(cc.set && cc.back == c.back && cc.tile == c.tile)) { extend = false; break; }
+                                    if (mask[static_cast<USize>(i + k + (j + h) * dims[u])] != key) { extend = false; break; }
                                 }
                                 if (extend) ++h;
                             }
+
                             S32 u0{i}, v0{j}, u1{i+w}, v1{j+h};
                             S32 a0[3]{}, a1[3]{}, a2[3]{}, a3[3]{};
                             a0[d]=x[d]; a0[u]=u0; a0[v]=v0;
                             a1[d]=x[d]; a1[u]=u0; a1[v]=v1;
                             a2[d]=x[d]; a2[u]=u1; a2[v]=v1;
                             a3[d]=x[d]; a3[u]=u1; a3[v]=v0;
+
                             Math::Vec3 p0{makePos(a0[0],a0[1],a0[2])};
                             Math::Vec3 p1{makePos(a1[0],a1[1],a1[2])};
                             Math::Vec3 p2{makePos(a2[0],a2[1],a2[2])};
                             Math::Vec3 p3{makePos(a3[0],a3[1],a3[2])};
+
                             Math::Vec3 nrm{};
-                            if (d==0) nrm = c.back ? Math::Vec3{-1,0,0} : Math::Vec3{+1,0,0};
-                            if (d==1) nrm = c.back ? Math::Vec3{0,-1,0} : Math::Vec3{0,+1,0};
-                            if (d==2) nrm = c.back ? Math::Vec3{0,0,-1} : Math::Vec3{0,0,+1};
-                            bool cw{!c.back};
+                            if (d==0) nrm = MaskBack(key) ? Math::Vec3{-1,0,0} : Math::Vec3{+1,0,0};
+                            if (d==1) nrm = MaskBack(key) ? Math::Vec3{0,-1,0} : Math::Vec3{0,+1,0};
+                            if (d==2) nrm = MaskBack(key) ? Math::Vec3{0,0,-1} : Math::Vec3{0,0,+1};
+
+                            bool cw{!MaskBack(key)};
                             Math::Vec2 t0{}, t1{}, t2{}, t3{};
                             if (d == 0 || d == 1) {
                                 t0 = {0.0f, 0.0f};
@@ -254,8 +271,13 @@ public:
                                 t2 = {static_cast<F32>(w), static_cast<F32>(h)};
                                 t3 = {static_cast<F32>(w), 0.0f};
                             }
-                            detail::AddFace(mesh->cpuVertices, p0,p1,p2,p3, nrm, t0,t1,t2,t3, c.tile, cw);
-                            for (S32 y{}; y < h; ++y) for (S32 xw{}; xw < w; ++xw) mask[static_cast<USize>(i + xw + (j + y) * dims[u])] = Cell{0u,false,false};
+
+                            detail::AddFace(mesh->cpuVertices, p0,p1,p2,p3, nrm, t0,t1,t2,t3, MaskTile(key), cw);
+
+                            for (S32 y{}; y < h; ++y) {
+                                USize base{static_cast<USize>((j + y) * dims[u] + i)};
+                                std::fill_n(mask.data() + base, static_cast<USize>(w), 0u);
+                            }
                             i += w;
                         }
                         ++j;
@@ -264,6 +286,7 @@ public:
             };
 
             greedyAxis(0); greedyAxis(1); greedyAxis(2);
+
             mesh->vertexCount = static_cast<U32>(mesh->cpuVertices.size());
             mesh->gpuDirty = true;
             const_cast<VoxelChunk*>(chunk)->dirty = false;
