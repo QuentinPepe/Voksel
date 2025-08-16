@@ -56,12 +56,22 @@ export struct VoxelAtlasInfo {
     U32 atlasH{0};
 };
 
+export struct VoxelCullingStats {
+    U32 tested{};
+    U32 visible{};
+    U32 culled{};
+    U32 drawCalls{};
+    U64 drawnVerts{};
+    U64 drawnIndices{};
+};
+
 export template<> struct ComponentTypeID<VoxelWorldConfig>{ static consteval ComponentID value(){return VoxelWorldConfig_ID;} };
 export template<> struct ComponentTypeID<VoxelChunk>{ static consteval ComponentID value(){return VoxelChunk_ID;} };
 export template<> struct ComponentTypeID<VoxelMesh>{ static consteval ComponentID value(){return VoxelMesh_ID;} };
 export template<> struct ComponentTypeID<VoxelRenderResources>{ static consteval ComponentID value(){return VoxelRenderResources_ID;} };
 export template<> struct ComponentTypeID<VoxelHotbarState>{ static consteval ComponentID value(){return VoxelHotbarState_ID;} };
 export template<> struct ComponentTypeID<VoxelAtlasInfo>{ static consteval ComponentID value(){return VoxelAtlasInfo_ID;} };
+export template<> struct ComponentTypeID<VoxelCullingStats>{ static consteval ComponentID value(){return VoxelCullingStats_ID;} };
 
 export inline USize VoxelIndex(U32 x,U32 y,U32 z){
     return static_cast<USize>(x)+static_cast<USize>(y)*VoxelChunk::SizeX+static_cast<USize>(z)*VoxelChunk::SizeX*VoxelChunk::SizeY;

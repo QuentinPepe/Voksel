@@ -172,10 +172,7 @@ public:
             rr = world->GetStorage<VoxelRenderResources>();
         }
         VoxelRenderResources const *res{};
-        for (auto [h, r]: *rr) {
-            res = &r;
-            break;
-        }
+        for (auto [h, r]: *rr) { res = &r; break; }
         assert(res != nullptr && res->pipeline != INVALID_INDEX, "Invalid render resources");
 
         if (m_CameraCB == INVALID_INDEX) m_CameraCB = m_Gfx->CreateConstantBuffer(sizeof(CameraConstants));
@@ -189,7 +186,7 @@ public:
                 "assets/log_oak.png", "assets/log_oak_top.png", "assets/oak_leaves.png", "assets/sand.png",
                 "assets/water.png"
             };
-            Vector<Vector<U32> > imgs{};
+            Vector<Vector<U32>> imgs{};
             imgs.resize(paths.size());
             Vector<U32> w{};
             w.resize(paths.size());
@@ -237,10 +234,7 @@ public:
                 auto e{world->CreateEntity()};
                 world->AddComponent(e, ai);
             } else {
-                for (auto [h, c] : *storeAI) {
-                    world->AddOrReplaceComponent(h, ai);
-                    break;
-                }
+                for (auto [h, c] : *storeAI) { world->AddOrReplaceComponent(h, ai); break; }
             }
         }
 
@@ -263,10 +257,7 @@ public:
         auto* wcfgStore{world->GetStorage<VoxelWorldConfig>()};
         assert(wcfgStore && wcfgStore->Size() > 0, "Missing VoxelWorldConfig");
         VoxelWorldConfig const* wcfg{};
-        for (auto [h, c] : *wcfgStore) {
-            wcfg = &c;
-            break;
-        }
+        for (auto [h, c] : *wcfgStore) { wcfg = &c; break; }
         const F32 sx{wcfg->blockSize * static_cast<F32>(VoxelChunk::SizeX)};
         const F32 sy{wcfg->blockSize * static_cast<F32>(VoxelChunk::SizeY)};
         const F32 sz{wcfg->blockSize * static_cast<F32>(VoxelChunk::SizeZ)};
@@ -277,6 +268,14 @@ public:
 
         auto *storage{world->GetStorage<VoxelMesh>()};
         if (!storage) return;
+
+        auto* sStore{world->GetStorage<VoxelCullingStats>()};
+        if (!sStore || sStore->Size() == 0) {
+            auto e{world->CreateEntity()};
+            world->AddComponent(e, VoxelCullingStats{});
+            sStore = world->GetStorage<VoxelCullingStats>();
+        }
+        VoxelCullingStats stats{};
 
         m_Gfx->SetPipeline(res->pipeline);
         m_Gfx->SetConstantBuffer(m_CameraCB, 0);
@@ -290,16 +289,25 @@ public:
             auto* chunk{world->GetComponent<VoxelChunk>(handle)};
             if (!chunk) continue;
 
-            Math::Bounds b{chunk->origin, chunk->origin + Math::Vec3{sx, sy, sz}};
-            if (!fr.Intersects(b)) continue;
+            stats.tested++;
 
+            Math::Bounds b{chunk->origin, chunk->origin + Math::Vec3{sx, sy, sz}};
+            if (!fr.Intersects(b)) { stats.culled++; continue; }
+
+            stats.visible++;
             m_Gfx->SetVertexBuffer(mesh.vertexBuffer);
             if (mesh.indexBuffer != INVALID_INDEX && mesh.indexCount > 0) {
                 m_Gfx->SetIndexBuffer(mesh.indexBuffer);
                 m_Gfx->DrawIndexed(mesh.indexCount);
+                stats.drawCalls++;
+                stats.drawnIndices += static_cast<U64>(mesh.indexCount);
             } else {
                 m_Gfx->Draw(mesh.vertexCount);
+                stats.drawCalls++;
+                stats.drawnVerts += static_cast<U64>(mesh.vertexCount);
             }
         }
+
+        for (auto [h, s] : *sStore) { world->AddOrReplaceComponent(h, stats); break; }
     }
 };

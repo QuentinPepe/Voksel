@@ -131,33 +131,42 @@ int main() {
    debugPanel->SetAnchor(AnchorPreset::TopLeft);
    debugPanel->SetPivot({0.0f, 0.0f});
    debugPanel->SetAnchoredPosition({10.0f, 10.0f});
-   debugPanel->SetSizeDelta({200.0f, 100.0f});
+   debugPanel->SetSizeDelta({200.0f, 140.0f});
    std::static_pointer_cast<UIPanel>(debugPanel)->SetBackgroundColor(Color{0.0f, 0.0f, 0.0f, 0.7f});
    uiManager.GetRoot()->AddChild(debugPanel);
 
-    auto debugLayout{uiManager.CreateVerticalLayout()};
-    auto v{std::static_pointer_cast<UIVerticalLayout>(debugLayout)};
-    v->SetPadding(Margin{5.0f});
-    v->SetSpacing(2.0f);
-    v->SetChildControl(true, false);
-    v->SetChildForceExpand(false, false);
-    debugPanel->AddChild(debugLayout);
+   auto debugLayout{uiManager.CreateVerticalLayout()};
+   auto v{std::static_pointer_cast<UIVerticalLayout>(debugLayout)};
+   v->SetPadding(Margin{5.0f});
+   v->SetSpacing(2.0f);
+   v->SetChildControl(true, false);
+   v->SetChildForceExpand(false, false);
+   debugPanel->AddChild(debugLayout);
 
-    auto sized = [](UIElementPtr e, float h){
-        e->SetAnchor(AnchorPreset::TopLeft);
-        e->SetPivot({0,0});
-        e->SetSizeDelta({190.0f, h});
-    };
+   auto sized = [](UIElementPtr e, float h){
+       e->SetAnchor(AnchorPreset::TopLeft);
+       e->SetPivot({0,0});
+       e->SetSizeDelta({190.0f, h});
+   };
 
-    auto fpsText{uiManager.CreateText("FPS: 60")};
-    std::static_pointer_cast<UIText>(fpsText)->SetTextColor(Color{0,1,0,1});
-    sized(fpsText, 16.0f);  v->AddChild(fpsText);
+   auto fpsText{uiManager.CreateText("FPS: 60")};
+   std::static_pointer_cast<UIText>(fpsText)->SetTextColor(Color{0,1,0,1});
+   sized(fpsText, 16.0f);  v->AddChild(fpsText);
 
-    auto posText{uiManager.CreateText("Pos: 0, 0, 0")};
-    sized(posText, 16.0f);  v->AddChild(posText);
+   auto posText{uiManager.CreateText("Pos: 0, 0, 0")};
+   sized(posText, 16.0f);  v->AddChild(posText);
 
-    auto chunkText{uiManager.CreateText("Chunks: 0")};
-    sized(chunkText, 16.0f); v->AddChild(chunkText);
+   auto chunkText{uiManager.CreateText("Chunks: 0")};
+   sized(chunkText, 16.0f); v->AddChild(chunkText);
+
+   auto visText{uiManager.CreateText("Visible: 0")};
+   sized(visText, 16.0f); v->AddChild(visText);
+
+   auto culledText{uiManager.CreateText("Culled: 0 / 0")};
+   sized(culledText, 16.0f); v->AddChild(culledText);
+
+   auto drawsText{uiManager.CreateText("Draws: 0  Vtx/Idx: 0/0")};
+   sized(drawsText, 16.0f); v->AddChild(drawsText);
 
    windowInput.SetResizeCallback([&graphics, &uiManager](U32 w, U32 h) {
        if (w > 0 && h > 0) {
@@ -174,7 +183,7 @@ int main() {
    orchestrator.SetWindow(&window);
    orchestrator.SetWorld(&world);
    orchestrator.SetGraphicsContext(graphics.get());
-    orchestrator.SetFrameLimit(144);
+   orchestrator.SetFrameLimit(144);
 
    EngineOrchestratorECS orchestratorECS{&orchestrator};
    SystemScheduler* scheduler{orchestratorECS.GetSystemScheduler()};
@@ -239,6 +248,14 @@ int main() {
        auto* chunkStore{world.GetStorage<VoxelChunk>()};
        if (chunkStore) {
            std::static_pointer_cast<UIText>(chunkText)->SetText(std::string{"Chunks: "} + Utils::ToString(chunkStore->Size()));
+       }
+
+       if (auto* sStore{world.GetStorage<VoxelCullingStats>()}; sStore && sStore->Size() > 0) {
+           VoxelCullingStats s{};
+           for (auto [h, cs] : *sStore) { s = cs; break; }
+           std::static_pointer_cast<UIText>(visText)->SetText(std::string{"Visible: "} + Utils::ToString(s.visible));
+           std::static_pointer_cast<UIText>(culledText)->SetText(std::string{"Culled: "} + Utils::ToString(s.culled) + " / " + Utils::ToString(s.tested));
+           std::static_pointer_cast<UIText>(drawsText)->SetText(std::string{"Draws: "} + Utils::ToString(s.drawCalls) + "  Vtx/Idx: " + Utils::ToString(static_cast<U64>(s.drawnVerts)) + "/" + Utils::ToString(static_cast<U64>(s.drawnIndices)));
        }
 
        uiManager.Update(frameTime);
