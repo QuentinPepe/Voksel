@@ -17,7 +17,9 @@ import Graphics;
 import Graphics.RenderData;
 import Core.Types;
 import Core.Assert;
+import Math.Vector;
 import Math.Matrix;
+import Math.Transform;
 import std;
 
 using Microsoft::WRL::ComPtr;
@@ -135,7 +137,9 @@ public:
         SetParallel(false);
     }
 
-    void SetGraphicsContext(IGraphicsContext *gfx) { m_Gfx = gfx; }
+    void SetGraphicsContext(IGraphicsContext *gfx) {
+        m_Gfx = gfx;
+    }
 
     U32 CreatePipeline() const {
         ShaderCode vs{};
@@ -192,7 +196,7 @@ public:
             Vector<U32> h{};
             h.resize(paths.size());
             for (USize i{}; i < paths.size(); ++i) {
-                bool ok{LoadImageRGBA(std::filesystem::path(paths[i]), imgs[i], w[i], h[i])};
+                bool ok{LoadImageRGBA(std::filesystem::path{paths[i]}, imgs[i], w[i], h[i])};
                 assert(ok, "Failed to load atlas tile");
                 assert(w[i] == h[i], "Tile must be square");
             }
@@ -201,12 +205,14 @@ public:
             U32 tile{w[0]};
             U32 tilesX{static_cast<U32>(imgs.size())};
             U32 tilesY{1};
-            U32 atlasW{tilesX * (tile + 2 * pad)};
-            U32 atlasH{tilesY * (tile + 2 * pad)};
+            U32 atlasW{tilesX * (tile + 2u * pad)};
+            U32 atlasH{tilesY * (tile + 2u * pad)};
             Vector<U32> pixels{};
             pixels.resize(static_cast<USize>(atlasW * atlasH), 0u);
 
-            for (U32 i{}; i < tilesX; ++i) { BlitWithPad(pixels, atlasW, atlasH, i, 0, tile, pad, imgs[i]); }
+            for (U32 i{}; i < tilesX; ++i) {
+                BlitWithPad(pixels, atlasW, atlasH, i, 0, tile, pad, imgs[i]);
+            }
 
             m_AtlasTex = m_Gfx->CreateTexture2D(pixels.data(), atlasW, atlasH, 1);
 
@@ -220,13 +226,21 @@ public:
             m_Gfx->UpdateConstantBuffer(m_AtlasCB, &ac, sizeof(ac));
 
             VoxelAtlasInfo ai{};
-            ai.texture = m_AtlasTex; ai.tilesX = tilesX; ai.tileSize = tile; ai.pad = pad; ai.atlasW = atlasW; ai.atlasH = atlasH;
+            ai.texture = m_AtlasTex;
+            ai.tilesX = tilesX;
+            ai.tileSize = tile;
+            ai.pad = pad;
+            ai.atlasW = atlasW;
+            ai.atlasH = atlasH;
             auto* storeAI{world->GetStorage<VoxelAtlasInfo>()};
-            if (!storeAI || storeAI->Size()==0){
+            if (!storeAI || storeAI->Size() == 0) {
                 auto e{world->CreateEntity()};
                 world->AddComponent(e, ai);
             } else {
-                for (auto [h,c] : *storeAI){ world->AddOrReplaceComponent(h, ai); break; }
+                for (auto [h, c] : *storeAI) {
+                    world->AddOrReplaceComponent(h, ai);
+                    break;
+                }
             }
         }
 
@@ -237,9 +251,25 @@ public:
                 cam.projection = c->projection;
                 cam.viewProjection = c->viewProjection;
             }
-            if (auto *t{world->GetComponent<Transform>(h)}) { cam.cameraPosition = t->position; }
+            if (auto *t{world->GetComponent<Transform>(h)}) {
+                cam.cameraPosition = t->position;
+            }
         }
         m_Gfx->UpdateConstantBuffer(m_CameraCB, &cam, sizeof(cam));
+
+        Math::Frustum fr{};
+        fr.SetFromMatrix(cam.viewProjection);
+
+        auto* wcfgStore{world->GetStorage<VoxelWorldConfig>()};
+        assert(wcfgStore && wcfgStore->Size() > 0, "Missing VoxelWorldConfig");
+        VoxelWorldConfig const* wcfg{};
+        for (auto [h, c] : *wcfgStore) {
+            wcfg = &c;
+            break;
+        }
+        const F32 sx{wcfg->blockSize * static_cast<F32>(VoxelChunk::SizeX)};
+        const F32 sy{wcfg->blockSize * static_cast<F32>(VoxelChunk::SizeY)};
+        const F32 sz{wcfg->blockSize * static_cast<F32>(VoxelChunk::SizeZ)};
 
         ObjectConstants obj{};
         obj.world = Math::Mat4::Identity;
@@ -256,6 +286,13 @@ public:
 
         for (auto [handle, mesh]: *storage) {
             if (mesh.vertexBuffer == INVALID_INDEX || mesh.vertexCount == 0) continue;
+
+            auto* chunk{world->GetComponent<VoxelChunk>(handle)};
+            if (!chunk) continue;
+
+            Math::Bounds b{chunk->origin, chunk->origin + Math::Vec3{sx, sy, sz}};
+            if (!fr.Intersects(b)) continue;
+
             m_Gfx->SetVertexBuffer(mesh.vertexBuffer);
             if (mesh.indexBuffer != INVALID_INDEX && mesh.indexCount > 0) {
                 m_Gfx->SetIndexBuffer(mesh.indexBuffer);
